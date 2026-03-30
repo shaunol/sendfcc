@@ -1,0 +1,8 @@
+{
+  "name": "sendfcc",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "deploy": "node build.js && npx wrangler deploy"
+  }
+}

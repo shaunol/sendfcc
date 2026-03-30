@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sendf.cc &mdash; Temporary File Sharing</title>
+<meta name="description" content="Drop a file, get a link, it disappears in 24 hours. No signup, no tracking, no limits. Free ephemeral file sharing.">
+<link rel="canonical" href="https://sendf.cc/">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<meta property="og:title" content="sendf.cc — Temporary File Sharing">
+<meta property="og:description" content="Drop a file, get a link, it disappears in 24 hours. No signup required.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://sendf.cc/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="sendf.cc — Temporary File Sharing">
+<meta name="twitter:description" content="Drop a file, get a link, it disappears in 24 hours.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=optional">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=optional" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=optional"></noscript>
+<style>
+  :root {
+    --bg: #f0fdfa;
+    --surface: #ffffff;
+    --text: #134e4a;
+    --text-muted: #5f8a87;
+    --accent: #0d9488;
+    --accent-hover: #0f766e;
+    --accent-light: #ccfbf1;
+    --border: #d1e7e5;
+    --green: #16a34a;
+    --red: #dc2626;
+    --mono: 'DM Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+    --radius: 16px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; display: flex; flex-direction: column; }
+  main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 2rem 1rem; }
+  .container { width: 100%; max-width: 520px; }
+
+  /* Header */
+  .brand { text-align: center; margin-bottom: 2rem; }
+  .brand h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.02em; }
+  .brand h1 .cc { color: var(--accent); }
+  .brand p { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.35rem; }
+
+  /* Drop zone */
+  .dropzone {
+    background: var(--surface);
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-light);
+  }
+  .dropzone-icon { font-size: 2.5rem; margin-bottom: 0.75rem; opacity: 0.6; }
+  .dropzone-text { color: var(--text-muted); font-size: 0.92rem; line-height: 1.5; }
+  .dropzone-text strong { color: var(--accent); }
+  .dropzone-limit { color: var(--text-muted); font-family: var(--mono); font-size: 0.75rem; margin-top: 0.75rem; }
+  .dropzone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+  /* Progress */
+  .progress-wrap { display: none; margin-top: 1.5rem; }
+  .progress-wrap.active { display: block; }
+  .progress-bar { width: 100%; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 4px; width: 0%; transition: width 0.3s; }
+  .progress-text { font-family: var(--mono); font-size: 0.78rem; color: var(--text-muted); margin-top: 0.4rem; text-align: center; }
+
+  /* Result */
+  .result { display: none; margin-top: 1.5rem; }
+  .result.active { display: block; }
+  .result-card {
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+  }
+  .result-filename {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .result-url-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
+  }
+  .result-url {
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 0.88rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--accent-light);
+    border: 1.5px solid var(--accent);
+    border-radius: 8px;
+    color: var(--accent-hover);
+    font-weight: 500;
+    outline: none;
+    cursor: text;
+  }
+  .copy-btn {
+    padding: 0.6rem 1rem;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    cursor: pointer;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+  .copy-btn:hover { background: var(--accent-hover); }
+  .copy-btn.copied { background: var(--green); }
+  .result-meta {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+  .upload-another {
+    display: block;
+    text-align: center;
+    margin-top: 1rem;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .upload-another:hover { text-decoration: underline; }
+
+  /* Error */
+  .error-msg {
+    display: none;
+    margin-top: 1rem;
+    padding: 0.6rem 1rem;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    color: var(--red);
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    text-align: center;
+  }
+  .error-msg.active { display: block; }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 1.5rem 1rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  /* Feedback */
+  .feedback-wrap { margin-top: 0.75rem; }
+  .feedback-toggle {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    cursor: pointer;
+    padding: 0;
+  }
+  .feedback-toggle:hover { text-decoration: underline; }
+  .feedback-form {
+    display: none;
+    margin-top: 0.75rem;
+    max-width: 400px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .feedback-form.open { display: block; }
+  .feedback-form textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 0.6rem;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--sans);
+    font-size: 0.85rem;
+    resize: vertical;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .feedback-form textarea:focus { outline: none; border-color: var(--accent); }
+  .feedback-submit {
+    margin-top: 0.5rem;
+    width: 100%;
+    padding: 0.5rem;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .feedback-submit:disabled { opacity: 0.4; cursor: default; }
+  .ts-status { font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); text-align: center; min-height: 1.2em; }
+  .ts-status .dot { display: inline-block; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .feedback-msg { margin-top: 0.5rem; font-family: var(--mono); font-size: 0.78rem; text-align: center; }
+  .feedback-msg.ok { color: var(--green); }
+  .feedback-msg.err { color: var(--red); }
+
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+
+  /* Noscript */
+  noscript { display: block; text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.9rem; line-height: 1.6; }
+</style>
+</head>
+<body>
+<main>
+  <div class="container">
+    <div class="brand">
+      <h1>sendf<span class="cc">.cc</span></h1>
+      <p>Drop a file, get a link. Expires in 24 hours.</p>
+    </div>
+
+    <div class="dropzone" id="dropzone">
+      <div class="dropzone-icon" aria-hidden="true">&#128228;</div>
+      <div class="dropzone-text">
+        <strong>Click to select</strong> or drag &amp; drop a file
+      </div>
+      <div class="dropzone-limit">Max 500 MB &middot; Files auto-delete after 24h</div>
+      <input type="file" id="fileInput" aria-label="Select file">
+    </div>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText">Uploading&hellip;</div>
+    </div>
+
+    <div class="error-msg" id="errorMsg"></div>
+
+    <div class="result" id="result">
+      <div class="result-card">
+        <div class="result-filename" id="resultFilename"></div>
+        <div class="result-url-row">
+          <input type="text" class="result-url" id="resultUrl" readonly>
+          <button type="button" class="copy-btn" id="copyBtn">Copy</button>
+        </div>
+        <div class="result-meta">
+          <span id="resultSize"></span>
+          <span id="resultExpiry"></span>
+        </div>
+      </div>
+      <a class="upload-another" id="uploadAnother">Upload another file</a>
+    </div>
+
+    <noscript>
+      <p>sendf.cc is a free, temporary file sharing service. Upload a file and get a short link that expires in 24 hours. No signup required. JavaScript is needed to use the upload functionality.</p>
+    </noscript>
+  </div>
+</main>
+
+<footer>
+  Files are stored temporarily and auto-deleted after 24 hours.
+  <div class="feedback-wrap">
+    <button type="button" class="feedback-toggle" id="fbToggle">Send feedback</button>
+    <form class="feedback-form" id="fbForm" aria-label="Send feedback">
+      <label for="fbMsg" class="sr-only">Feedback</label>
+      <textarea id="fbMsg" placeholder="What could we do better?" maxlength="2000"></textarea>
+      <div class="cf-turnstile" id="tsCont"></div>
+      <div class="ts-status" id="tsStatus"></div>
+      <button type="submit" class="feedback-submit" id="fbSubmit" disabled>Send</button>
+    </form>
+    <div class="feedback-msg" id="fbStatus" role="status" aria-live="polite"></div>
+  </div>
+</footer>
+
+<script>
+(function() {
+  var dropzone = document.getElementById('dropzone');
+  var fileInput = document.getElementById('fileInput');
+  var progressWrap = document.getElementById('progressWrap');
+  var progressFill = document.getElementById('progressFill');
+  var progressText = document.getElementById('progressText');
+  var errorMsg = document.getElementById('errorMsg');
+  var resultDiv = document.getElementById('result');
+  var resultFilename = document.getElementById('resultFilename');
+  var resultUrl = document.getElementById('resultUrl');
+  var resultSize = document.getElementById('resultSize');
+  var resultExpiry = document.getElementById('resultExpiry');
+  var copyBtn = document.getElementById('copyBtn');
+  var uploadAnother = document.getElementById('uploadAnother');
+  var currentToken = null;
+  var uploadToken = null;
+  var tsLoaded = false;
+
+  // Load Turnstile early (invisible, interaction-only)
+  function loadTurnstile(targetId, callback) {
+    if (tsLoaded) return;
+    tsLoaded = true;
+    window.__tsReady = function() {
+      if (typeof turnstile !== 'undefined') {
+        turnstile.render('#' + targetId, {
+          sitekey: '0x4AAAAAACxQ-lwtkUAeTKh3',
+          size: 'flexible',
+          appearance: 'interaction-only',
+          callback: function(token) { callback(token); },
+          'error-callback': function() {},
+        });
+      }
+    };
+    var s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=__tsReady&render=explicit';
+    s.async = true;
+    document.head.appendChild(s);
+  }
+
+  // Load upload Turnstile on page load
+  loadTurnstile('dropzone', function(token) { uploadToken = token; });
+
+  function formatBytes(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+    if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+    return (b / 1073741824).toFixed(1) + ' GB';
+  }
+
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.classList.add('active');
+    progressWrap.classList.remove('active');
+  }
+
+  function resetUI() {
+    dropzone.style.display = '';
+    progressWrap.classList.remove('active');
+    resultDiv.classList.remove('active');
+    errorMsg.classList.remove('active');
+    progressFill.style.width = '0%';
+    fileInput.value = '';
+  }
+
+  function uploadFile(file) {
+    if (!file) return;
+    if (file.size > 500 * 1024 * 1024) { showError('File too large (max 500 MB)'); return; }
+    if (file.size === 0) { showError('Empty file'); return; }
+
+    dropzone.style.display = 'none';
+    errorMsg.classList.remove('active');
+    progressWrap.classList.add('active');
+    progressFill.style.width = '0%';
+    progressText.textContent = 'Uploading ' + file.name + '\u2026';
+
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('token', uploadToken || '');
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/upload');
+
+    xhr.upload.onprogress = function(e) {
+      if (e.lengthComputable) {
+        var pct = Math.round((e.loaded / e.total) * 100);
+        progressFill.style.width = pct + '%';
+        progressText.textContent = pct + '% \u2014 ' + formatBytes(e.loaded) + ' / ' + formatBytes(e.total);
+      }
+    };
+
+    xhr.onload = function() {
+      try {
+        var data = JSON.parse(xhr.responseText);
+        if (xhr.status === 200 && data.url) {
+          progressWrap.classList.remove('active');
+          resultFilename.textContent = data.filename;
+          resultUrl.value = data.url;
+          resultSize.textContent = formatBytes(data.size);
+          var exp = new Date(data.expires);
+          resultExpiry.textContent = 'Expires ' + exp.toLocaleString();
+          resultDiv.classList.add('active');
+          // Reset Turnstile for next upload
+          if (typeof turnstile !== 'undefined') turnstile.reset();
+          uploadToken = null;
+        } else {
+          showError(data.error || 'Upload failed');
+        }
+      } catch (e) {
+        showError('Upload failed');
+      }
+    };
+
+    xhr.onerror = function() { showError('Network error'); };
+    xhr.send(formData);
+  }
+
+  // Drag and drop
+  dropzone.addEventListener('dragover', function(e) { e.preventDefault(); dropzone.classList.add('drag-over'); });
+  dropzone.addEventListener('dragleave', function() { dropzone.classList.remove('drag-over'); });
+  dropzone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dropzone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+  });
+
+  fileInput.addEventListener('change', function() {
+    if (fileInput.files.length) uploadFile(fileInput.files[0]);
+  });
+
+  copyBtn.addEventListener('click', function() {
+    navigator.clipboard.writeText(resultUrl.value).then(function() {
+      copyBtn.textContent = 'Copied!';
+      copyBtn.classList.add('copied');
+      setTimeout(function() { copyBtn.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 1500);
+    });
+  });
+
+  uploadAnother.addEventListener('click', function(e) { e.preventDefault(); resetUI(); });
+
+  /* --- Feedback --- */
+  var fbToggle = document.getElementById('fbToggle');
+  var fbForm = document.getElementById('fbForm');
+  var fbMsg = document.getElementById('fbMsg');
+  var fbSubmit = document.getElementById('fbSubmit');
+  var fbStatus = document.getElementById('fbStatus');
+  var tsStatus = document.getElementById('tsStatus');
+  var fbToken = null;
+  var fbTsLoaded = false;
+
+  fbToggle.addEventListener('click', function() {
+    var open = fbForm.classList.toggle('open');
+    if (open && !fbTsLoaded) {
+      fbTsLoaded = true;
+      tsStatus.innerHTML = '<span class="dot">\u25cf</span> Verifying\u2026';
+      window.__fbTsReady = function() {
+        if (typeof turnstile !== 'undefined') {
+          turnstile.render('#tsCont', {
+            sitekey: '0x4AAAAAACxQ-lwtkUAeTKh3',
+            size: 'flexible',
+            appearance: 'interaction-only',
+            callback: function(token) { fbToken = token; tsStatus.textContent = ''; fbSubmit.disabled = !fbMsg.value.trim(); },
+            'error-callback': function() { tsStatus.textContent = ''; },
+          });
+        }
+      };
+      if (typeof turnstile !== 'undefined') { window.__fbTsReady(); }
+      else {
+        var s = document.createElement('script');
+        s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=__fbTsReady&render=explicit';
+        s.async = true;
+        document.head.appendChild(s);
+      }
+    }
+    if (!open) { fbStatus.textContent = ''; fbToken = null; fbSubmit.disabled = true; }
+  });
+
+  fbMsg.addEventListener('input', function() { fbSubmit.disabled = !(fbMsg.value.trim() && fbToken); });
+
+  fbForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    fbSubmit.disabled = true;
+    fbStatus.textContent = 'Sending\u2026';
+    fbStatus.className = 'feedback-msg';
+    fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: fbMsg.value, page: '/', token: fbToken }),
+    })
+    .then(function(res) {
+      if (res.ok) {
+        fbForm.classList.remove('open');
+        fbMsg.value = '';
+        fbToken = null;
+        fbStatus.textContent = 'Thanks for your feedback!';
+        fbStatus.className = 'feedback-msg ok';
+      } else {
+        fbStatus.textContent = 'Something went wrong. Please try again.';
+        fbStatus.className = 'feedback-msg err';
+      }
+      fbSubmit.disabled = true;
+    })
+    .catch(function() {
+      fbStatus.textContent = 'Something went wrong. Please try again.';
+      fbStatus.className = 'feedback-msg err';
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{
+  "name": "sendfcc",
+  "main": "dist/worker.js",
+  "compatibility_date": "2025-09-27",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "NODES",
+      "id": "PLACEHOLDER_NODES_KV_ID"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sendf-db",
+      "database_id": "PLACEHOLDER_D1_ID"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "DASHBOARD_HUB", "class_name": "DashboardHub" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_classes": ["DashboardHub"] }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}
