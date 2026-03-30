@@ -315,7 +315,7 @@
     window.__tsReady = function() {
       if (typeof turnstile !== 'undefined') {
         turnstile.render('#' + targetId, {
-          sitekey: '0x4AAAAAACxQ-lwtkUAeTKh3',
+          sitekey: '0x4AAAAAACyDQkFarV18g9f6',
           size: 'flexible',
           appearance: 'interaction-only',
           callback: function(token) { callback(token); },
@@ -447,7 +447,7 @@
       window.__fbTsReady = function() {
         if (typeof turnstile !== 'undefined') {
           turnstile.render('#tsCont', {
-            sitekey: '0x4AAAAAACxQ-lwtkUAeTKh3',
+            sitekey: '0x4AAAAAACyDQkFarV18g9f6',
             size: 'flexible',
             appearance: 'interaction-only',
             callback: function(token) { fbToken = token; tsStatus.textContent = ''; fbSubmit.disabled = !fbMsg.value.trim(); },

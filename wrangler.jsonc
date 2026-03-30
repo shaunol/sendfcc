@@ -11,14 +11,14 @@
   "kv_namespaces": [
     {
       "binding": "NODES",
-      "id": "PLACEHOLDER_NODES_KV_ID"
+      "id": "44d0f16cdffc4ed1a94959cfc44ed450"
     }
   ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "sendf-db",
-      "database_id": "PLACEHOLDER_D1_ID"
+      "database_id": "22566585-58f0-4a54-a85c-a54c55b7daf7"
     }
   ],
   "durable_objects": {
