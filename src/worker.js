@@ -233,6 +233,15 @@ async function handleDownload(id, env, request) {
   const node = nodes.find(n => n.id === row.node);
   if (!node) return errorPage(503, 'Unavailable', 'The storage node is temporarily unavailable.');
 
+  // Record download page visit (fire-and-forget)
+  const dlIp = (request.headers.get('CF-Connecting-IP') || '').slice(0, 45);
+  const dlCountry = (request.headers.get('CF-IPCountry') || '').slice(0, 10);
+  const dlUa = (request.headers.get('User-Agent') || '').slice(0, 500);
+  const dlReferer = (request.headers.get('Referer') || '').slice(0, 500);
+  env.DB.prepare(
+    'INSERT INTO file_downloads (file_id, ip, country, ua, referer, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(id, dlIp, dlCountry, dlUa, dlReferer, new Date().toISOString()).run().catch(() => {});
+
   const fileUrl = node.url + '/files/' + id + '/' + row.filename;
   const expiresAt = new Date(row.expires_at);
   const remaining = Math.max(0, expiresAt.getTime() - Date.now());
@@ -1563,7 +1572,12 @@ async function handleAdminFiles(env, url) {
 // ── Admin File Detail ──
 
 async function handleAdminFileDetail(fileId, env) {
-  const file = await env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(fileId).first();
+  const [file, dlStats, dlRecent, dlCountries] = await Promise.all([
+    env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(fileId).first(),
+    env.DB.prepare('SELECT COUNT(*) as hits, COUNT(DISTINCT ip) as unique_ips FROM file_downloads WHERE file_id = ?').bind(fileId).first().catch(() => null),
+    env.DB.prepare('SELECT ip, country, ua, referer, created_at FROM file_downloads WHERE file_id = ? ORDER BY created_at DESC LIMIT 50').bind(fileId).all().catch(() => null),
+    env.DB.prepare('SELECT country, COUNT(*) as cnt FROM file_downloads WHERE file_id = ? AND country != \'\' GROUP BY country ORDER BY cnt DESC LIMIT 10').bind(fileId).all().catch(() => null),
+  ]);
   if (!file) return new Response('File not found', { status: 404 });
 
   const expired = new Date(file.expires_at) < new Date();
@@ -1571,6 +1585,21 @@ async function handleAdminFileDetail(fileId, env) {
   const nodes = configRaw ? JSON.parse(configRaw) : [];
   const node = nodes.find(n => n.id === file.node);
   const fileUrl = node ? node.url + '/files/' + file.id + '/' + file.filename : '';
+
+  const hits = dlStats?.hits || 0;
+  const uniqueIps = dlStats?.unique_ips || 0;
+  const estBandwidth = hits * file.size; // estimate: each page view likely = 1 download
+  const downloads = dlRecent?.results || [];
+  const countries = dlCountries?.results || [];
+
+  // Fetch nginx download stats from node if available
+  let nodeDownloads = null;
+  if (node) {
+    try {
+      const r = await fetch(node.url + '/download-stats/' + fileId, { signal: AbortSignal.timeout(3000) });
+      if (r.ok) nodeDownloads = await r.json();
+    } catch {}
+  }
 
   return new Response(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1583,26 +1612,44 @@ async function handleAdminFileDetail(fileId, env) {
   body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; padding:2rem 1rem; }
   .wrap { max-width:900px; margin:0 auto; }
   h1 { font-weight:700; font-size:1.6rem; margin-bottom:0.25rem; }
+  h2 { font-weight:600; font-size:1.05rem; margin:1.25rem 0 0.75rem; }
   .subtitle { color:var(--text-muted); font-size:0.88rem; margin-bottom:1.5rem; }
   .subtitle a { color:var(--accent); text-decoration:none; }
   .subtitle a:hover { text-decoration:underline; }
   .msg-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:1.25rem; margin-bottom:1rem; }
   .msg-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; }
   .msg-title { font-weight:600; font-size:1rem; word-break:break-all; }
-  .msg-id { font-family:var(--mono); font-size:0.75rem; color:var(--text-muted); }
   .detail-row { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.5rem; font-family:var(--mono); font-size:0.82rem; }
-  .detail-label { color:var(--text-muted); min-width:80px; }
+  .detail-label { color:var(--text-muted); min-width:100px; }
   .detail-value { color:var(--text); word-break:break-all; }
   .badge { display:inline-block; padding:0.1rem 0.4rem; border-radius:4px; font-family:var(--mono); font-size:0.7rem; }
   .badge-country { background:var(--green-light); color:var(--green); }
   .badge-expired { background:#fef2f2; color:var(--red); }
   .badge-active { background:var(--green-light); color:var(--green); }
+  .stats-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:0.5rem; margin-bottom:1rem; }
+  .stat { background:var(--surface); border:1.5px solid var(--border); border-radius:10px; padding:0.75rem; }
+  .stat-label { font-family:var(--mono); font-size:0.65rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.2rem; }
+  .stat-num { font-family:var(--mono); font-size:1.5rem; font-weight:500; color:var(--accent); }
+  .stat-num.green { color:var(--green); }
   .msg-fingerprint { margin-top:0.75rem; padding-top:0.75rem; border-top:1px dashed var(--border); font-family:var(--mono); font-size:0.75rem; color:var(--text-muted); opacity:0.7; line-height:1.8; }
   .btn { padding:0.4rem 1rem; border:none; border-radius:8px; font-family:var(--mono); font-size:0.82rem; cursor:pointer; text-decoration:none; display:inline-block; }
   .btn-danger { background:var(--red); color:#fff; margin-top:1rem; }
   .btn-danger:hover { opacity:0.85; }
   .btn-link { background:none; color:var(--accent); border:1.5px solid var(--border); margin-top:1rem; margin-right:0.5rem; }
   .btn-link:hover { border-color:var(--accent); background:var(--accent-light); }
+  table { width:100%; border-collapse:collapse; font-size:0.82rem; margin-bottom:1rem; }
+  thead th { text-align:left; padding:0.4rem 0.6rem; font-family:var(--mono); font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); border-bottom:2px solid var(--border); font-weight:500; }
+  tbody td { padding:0.4rem 0.6rem; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:0.75rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  tbody tr:hover { background:var(--accent-light); }
+  .country-tags { display:flex; gap:0.35rem; flex-wrap:wrap; }
+  @media(max-width:700px) {
+    .stats-row { grid-template-columns:repeat(2, 1fr); }
+    table { font-size:0.75rem; }
+    thead { display:none; }
+    tbody tr { display:block; padding:0.5rem; margin-bottom:0.5rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; }
+    tbody td { display:block; padding:0.15rem 0; border:none; max-width:none; white-space:normal; }
+    tbody td::before { content:attr(data-label); font-size:0.6rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); display:block; }
+  }
 </style></head>
 <body><div class="wrap">
   <h1>File Detail</h1>
@@ -1627,6 +1674,32 @@ async function handleAdminFileDetail(fileId, env) {
       ${fileUrl ? 'Direct: <a href="' + esc(fileUrl) + '" style="color:var(--accent)">' + esc(fileUrl) + '</a>' : ''}
     </div>
   </div>
+
+  <h2>Download Stats</h2>
+  <div class="stats-row">
+    <div class="stat"><div class="stat-label">Page Views</div><div class="stat-num">${hits}</div></div>
+    <div class="stat"><div class="stat-label">Unique IPs</div><div class="stat-num green">${uniqueIps}</div></div>
+    <div class="stat"><div class="stat-label">Est. Bandwidth</div><div class="stat-num">${formatBytes(estBandwidth)}</div></div>
+    ${nodeDownloads ? `<div class="stat"><div class="stat-label">Node Downloads</div><div class="stat-num green">${nodeDownloads.hits || 0}</div></div>
+    <div class="stat"><div class="stat-label">Node Bytes Sent</div><div class="stat-num">${formatBytes(nodeDownloads.bytes_sent || 0)}</div></div>` : ''}
+  </div>
+
+  ${countries.length > 0 ? `<div style="margin-bottom:1rem"><span style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted)">Countries: </span><span class="country-tags">${countries.map(c => '<span class="badge badge-country">' + esc(c.country) + ' ' + c.cnt + '</span>').join(' ')}</span></div>` : ''}
+
+  ${downloads.length > 0 ? `
+  <h2>Recent Downloads</h2>
+  <table>
+    <thead><tr><th>Time</th><th>IP</th><th>Country</th><th>Referer</th><th>User Agent</th></tr></thead>
+    <tbody>
+      ${downloads.map(d => `<tr>
+        <td data-label="Time">${esc(d.created_at || '')}</td>
+        <td data-label="IP">${esc(d.ip || '')}</td>
+        <td data-label="Country">${d.country ? '<span class="badge badge-country">' + esc(d.country) + '</span>' : ''}</td>
+        <td data-label="Referer" title="${esc(d.referer || '')}">${esc((d.referer || '').replace(/^https?:\/\//, '').slice(0, 40))}</td>
+        <td data-label="UA" title="${esc(d.ua || '')}">${esc((d.ua || '').slice(0, 50))}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>` : ''}
 
   ${!expired && fileUrl ? '<a href="' + esc(fileUrl) + '" class="btn btn-link" target="_blank">Download from node</a>' : ''}
   <button class="btn btn-danger" onclick="deleteFile()">Delete File</button>
