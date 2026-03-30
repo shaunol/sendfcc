@@ -181,6 +181,27 @@ async function handleUpload(request, env, ctx) {
   });
 }
 
+// ── Error Page ──
+
+function errorPage(status, heading, message) {
+  return new Response(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${esc(heading)} &mdash; sendf.cc</title><meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=optional">
+<style>:root{--bg:#f0fdfa;--text:#134e4a;--text-muted:#5f8a87;--accent:#0d9488;--mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif}*{margin:0;padding:0;box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1rem;text-align:center}h1{font-weight:700;font-size:3rem;margin-bottom:0.5rem}p{color:var(--text-muted);font-size:0.95rem;margin-bottom:1.5rem;max-width:400px;line-height:1.5}a{color:var(--accent);text-decoration:none;font-family:var(--mono);font-size:0.88rem}a:hover{text-decoration:underline}.brand{font-size:1.2rem;font-weight:700;margin-bottom:2rem}.brand .cc{color:var(--accent)}.links{display:flex;gap:1.5rem;justify-content:center}</style>
+</head><body><div class="brand">sendf<span class="cc">.cc</span></div><h1>${status}</h1><p>${esc(message)}</p>
+<div class="links"><a href="/">Upload a file</a></div></body></html>`, {
+    status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+    },
+  });
+}
+
 // ── Download Redirect ──
 
 async function handleDownload(id, env) {
@@ -188,11 +209,11 @@ async function handleDownload(id, env) {
     'SELECT node, filename, size, mime, expires_at FROM files WHERE id = ?'
   ).bind(id).first();
 
-  if (!row) return json({ error: 'File not found' }, 404);
+  if (!row) return errorPage(404, 'Not Found', 'This file doesn\u2019t exist or has been removed.');
 
   // Check expiry
   if (new Date(row.expires_at) < new Date()) {
-    return json({ error: 'File expired' }, 410);
+    return errorPage(410, 'Expired', 'This file has expired. Files are automatically deleted after 24 hours.');
   }
 
   // Look up node URL
@@ -400,7 +421,7 @@ async function renderDashboardBody(env, url) {
 
   return `
   <h1>Dashboard</h1>
-  <p class="subtitle"><span class="live-dot"></span>sendf.cc &mdash; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/files">files</a></p>
+  <p class="subtitle"><span class="live-dot"></span>sendf.cc &mdash; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/speedtest">speed test</a></p>
 
   <div class="ext-links">
     <a href="https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain%3Asendf.cc" target="_blank" rel="noopener">Google</a>
@@ -499,7 +520,9 @@ async function renderDashboardBody(env, url) {
   </table>`}
 
   <h2>Daily Breakdown</h2>
-  ${daily.length === 0 ? '<div class="empty">No data yet</div>' : `
+  ${daily.length === 0 ? '<div class="empty">No data yet</div>' : (() => {
+  const maxDaily = Math.max(...daily.map(d => d.total), 1);
+  return `
   <table>
     <thead><tr><th>Date</th><th class="right">Hits</th><th></th></tr></thead>
     <tbody>
@@ -512,7 +535,8 @@ async function renderDashboardBody(env, url) {
         </tr>`;
       }).join('')}
     </tbody>
-  </table>`}`;
+  </table>`;
+  })()}`;
 }
 
 // ── DashboardHub Durable Object ──
@@ -580,6 +604,208 @@ export class DashboardHub {
 
   webSocketClose() {}
   webSocketError(ws) { try { ws.close(); } catch (_) {} }
+}
+
+// ── Speed Test ──
+
+async function handleSpeedTest(env) {
+  const configRaw = await env.NODES.get('config');
+  const nodes = configRaw ? JSON.parse(configRaw) : [];
+  const results = [];
+
+  for (const node of nodes) {
+    const result = { id: node.id, url: node.url, continent: node.continent };
+
+    // Test 1: Latency (health endpoint)
+    try {
+      const start = Date.now();
+      const r = await fetch(node.url + '/health', { signal: AbortSignal.timeout(5000) });
+      result.latency = Date.now() - start;
+      result.healthOk = r.ok;
+    } catch {
+      result.latency = -1;
+      result.healthOk = false;
+    }
+
+    // Test 2: Download speed (fetch stats.json — small payload, measures TTFB + transfer)
+    try {
+      const start = Date.now();
+      const r = await fetch(node.url + '/stats', { signal: AbortSignal.timeout(5000) });
+      const body = await r.text();
+      result.downloadMs = Date.now() - start;
+      result.downloadBytes = body.length;
+    } catch {
+      result.downloadMs = -1;
+      result.downloadBytes = 0;
+    }
+
+    // Test 3: Upload speed (PUT a 100KB test payload)
+    try {
+      const testData = new Uint8Array(102400); // 100KB of zeros
+      const testId = '_speedtest_' + Date.now();
+      const start = Date.now();
+      const r = await fetch(node.url + '/files/' + testId + '/test.bin', {
+        method: 'PUT',
+        body: testData,
+        headers: { 'X-Upload-Key': env.UPLOAD_KEY, 'Content-Type': 'application/octet-stream' },
+        signal: AbortSignal.timeout(10000),
+      });
+      result.uploadMs = Date.now() - start;
+      result.uploadOk = r.ok;
+      result.uploadBytes = 102400;
+      // Clean up test file
+      fetch(node.url + '/files/' + testId + '/test.bin', {
+        method: 'DELETE',
+        headers: { 'X-Upload-Key': env.UPLOAD_KEY },
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => {});
+    } catch {
+      result.uploadMs = -1;
+      result.uploadOk = false;
+    }
+
+    results.push(result);
+  }
+
+  return json({ results, colo: '', ts: Date.now() });
+}
+
+async function handleSpeedTestPage(env) {
+  const configRaw = await env.NODES.get('config');
+  const nodes = configRaw ? JSON.parse(configRaw) : [];
+
+  return new Response(`<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speed Test &mdash; sendf.cc admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=optional">
+<style>
+  :root { --bg:#f0fdfa; --surface:#fff; --text:#134e4a; --text-muted:#5f8a87; --accent:#0d9488; --accent-light:#ccfbf1; --border:#d1e7e5; --green:#16a34a; --red:#dc2626; --mono:'DM Mono',monospace; --sans:'DM Sans',sans-serif; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; padding:2rem 1rem; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { font-weight:700; font-size:1.6rem; margin-bottom:0.25rem; }
+  .subtitle { color:var(--text-muted); font-size:0.88rem; margin-bottom:1.5rem; }
+  .subtitle a { color:var(--accent); text-decoration:none; }
+  .subtitle a:hover { text-decoration:underline; }
+  h2 { font-weight:600; font-size:1.1rem; margin:1.5rem 0 0.75rem; }
+  .btn { padding:0.5rem 1.2rem; border:none; border-radius:8px; font-family:var(--mono); font-size:0.85rem; cursor:pointer; background:var(--accent); color:#fff; }
+  .btn:hover { opacity:0.85; }
+  .btn:disabled { opacity:0.4; cursor:default; }
+  .node-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:1rem; margin-bottom:0.75rem; }
+  .node-header { font-family:var(--mono); font-size:0.9rem; font-weight:600; margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem; }
+  .node-region { font-size:0.72rem; color:var(--text-muted); font-weight:400; }
+  .test-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.5rem; }
+  .test-item { background:var(--bg); border-radius:8px; padding:0.6rem 0.75rem; }
+  .test-label { font-family:var(--mono); font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.2rem; }
+  .test-val { font-family:var(--mono); font-size:1.1rem; font-weight:500; color:var(--accent); }
+  .test-val.bad { color:var(--red); }
+  .test-val.good { color:var(--green); }
+  .test-sub { font-family:var(--mono); font-size:0.68rem; color:var(--text-muted); }
+  .client-test { margin-top:0.5rem; }
+  .progress-bar { width:100%; height:6px; background:var(--border); border-radius:3px; overflow:hidden; margin:0.5rem 0; }
+  .progress-fill { height:100%; background:var(--accent); border-radius:3px; width:0%; transition:width 0.3s; }
+  #status { font-family:var(--mono); font-size:0.82rem; color:var(--text-muted); margin:0.75rem 0; }
+</style>
+</head><body>
+<div class="wrap">
+  <h1>Speed Test</h1>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/feedback">feedback</a></p>
+
+  <button class="btn" id="runBtn" onclick="runAll()">Run Speed Test</button>
+  <div class="progress-bar" id="progressBar" style="display:none"><div class="progress-fill" id="progressFill"></div></div>
+  <div id="status"></div>
+
+  <h2>CF Worker &rarr; Node (server-side)</h2>
+  <div id="cfResults"><div style="color:var(--text-muted);font-family:var(--mono);font-size:0.85rem;padding:1rem;">Click "Run Speed Test" to begin</div></div>
+
+  <h2>Your Browser &rarr; Node (client-side)</h2>
+  <div id="clientResults"></div>
+</div>
+
+<script>
+var NODES = ${JSON.stringify(nodes.map(n => ({ id: n.id, url: n.url, continent: n.continent })))};
+
+function fmt(ms) { return ms < 0 ? 'FAIL' : ms + 'ms'; }
+function fmtSpeed(bytes, ms) {
+  if (ms <= 0) return '-';
+  var bps = (bytes * 8 * 1000) / ms;
+  if (bps > 1e9) return (bps/1e9).toFixed(1) + ' Gbps';
+  if (bps > 1e6) return (bps/1e6).toFixed(1) + ' Mbps';
+  if (bps > 1e3) return (bps/1e3).toFixed(1) + ' Kbps';
+  return bps.toFixed(0) + ' bps';
+}
+function cls(ms) { return ms < 0 ? 'bad' : ms < 100 ? 'good' : ms < 500 ? '' : 'bad'; }
+
+async function runAll() {
+  var btn = document.getElementById('runBtn');
+  var bar = document.getElementById('progressBar');
+  var fill = document.getElementById('progressFill');
+  var status = document.getElementById('status');
+  btn.disabled = true;
+  bar.style.display = 'block';
+  fill.style.width = '10%';
+  status.textContent = 'Testing CF Worker to nodes...';
+
+  // Server-side test
+  try {
+    var r = await fetch('/admin/api/speedtest');
+    var data = await r.json();
+    fill.style.width = '50%';
+    var html = '';
+    data.results.forEach(function(n) {
+      html += '<div class="node-card"><div class="node-header">' + n.id + ' <span class="node-region">' + (n.continent||'') + ' &middot; ' + n.url + '</span></div>';
+      html += '<div class="test-grid">';
+      html += '<div class="test-item"><div class="test-label">Latency</div><div class="test-val ' + cls(n.latency) + '">' + fmt(n.latency) + '</div></div>';
+      html += '<div class="test-item"><div class="test-label">Download (stats)</div><div class="test-val ' + cls(n.downloadMs) + '">' + fmt(n.downloadMs) + '</div><div class="test-sub">' + (n.downloadBytes||0) + ' bytes</div></div>';
+      html += '<div class="test-item"><div class="test-label">Upload (100KB)</div><div class="test-val ' + cls(n.uploadMs) + '">' + fmt(n.uploadMs) + '</div><div class="test-sub">' + fmtSpeed(n.uploadBytes||0, n.uploadMs) + '</div></div>';
+      html += '</div></div>';
+    });
+    document.getElementById('cfResults').innerHTML = html;
+  } catch(e) {
+    document.getElementById('cfResults').innerHTML = '<div class="node-card" style="color:var(--red)">Error: ' + e.message + '</div>';
+  }
+
+  // Client-side test
+  status.textContent = 'Testing your browser to nodes...';
+  var clientHtml = '';
+  for (var i = 0; i < NODES.length; i++) {
+    var node = NODES[i];
+    fill.style.width = (50 + (i+1) / NODES.length * 45) + '%';
+    var latency = -1, dlMs = -1, dlBytes = 0;
+    // Latency
+    try {
+      var t0 = performance.now();
+      var resp = await fetch(node.url + '/health', { mode: 'cors', cache: 'no-store' });
+      await resp.text();
+      latency = Math.round(performance.now() - t0);
+    } catch(e) {}
+    // Download speed (fetch stats.json)
+    try {
+      var t1 = performance.now();
+      var resp2 = await fetch(node.url + '/stats', { mode: 'cors', cache: 'no-store' });
+      var body = await resp2.text();
+      dlMs = Math.round(performance.now() - t1);
+      dlBytes = body.length;
+    } catch(e) {}
+
+    clientHtml += '<div class="node-card"><div class="node-header">' + node.id + ' <span class="node-region">' + (node.continent||'') + ' &middot; ' + node.url + '</span></div>';
+    clientHtml += '<div class="test-grid">';
+    clientHtml += '<div class="test-item"><div class="test-label">Latency</div><div class="test-val ' + cls(latency) + '">' + fmt(latency) + '</div></div>';
+    clientHtml += '<div class="test-item"><div class="test-label">Download</div><div class="test-val ' + cls(dlMs) + '">' + fmt(dlMs) + '</div><div class="test-sub">' + dlBytes + ' bytes</div></div>';
+    clientHtml += '</div></div>';
+  }
+  document.getElementById('clientResults').innerHTML = clientHtml;
+
+  fill.style.width = '100%';
+  status.textContent = 'Complete!';
+  btn.disabled = false;
+  setTimeout(function(){ bar.style.display = 'none'; fill.style.width = '0%'; }, 2000);
+}
+</script>
+</body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
 // ── Admin Dashboard Page Shell ──
@@ -1021,6 +1247,9 @@ function html(body, lang, request) {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'public, max-age=0, must-revalidate',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
     },
   });
 }
@@ -1106,6 +1335,16 @@ export default {
       return stub.fetch(new Request(doUrl, request));
     }
 
+    // Admin speed test API (CF-to-node latency + throughput)
+    if (path === '/admin/api/speedtest') {
+      return handleSpeedTest(env);
+    }
+
+    // Admin speed test page
+    if (path === '/admin/speedtest') {
+      return handleSpeedTestPage(env);
+    }
+
     // Admin dashboard
     if (path === '/admin' || path === '/admin/') {
       return handleAdminDashboard(env, url);
@@ -1145,7 +1384,7 @@ export default {
     }
 
     // Static assets
-    if (path === '/robots.txt' || path === '/favicon.ico' || path.startsWith('/public/')) {
+    if (path === '/robots.txt' || path === '/sitemap.xml' || path === '/favicon.ico' || path === '/site.webmanifest' || path === '/og-image.png' || path === '/apple-touch-icon.png' || path.match(/^\/(favicon|icon)-\d+/) || path.startsWith('/public/')) {
       const assetUrl = new URL(request.url);
       return env.ASSETS.fetch(new Request(assetUrl, request));
     }
@@ -1157,13 +1396,6 @@ export default {
     }
 
     // 404
-    return new Response(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Not Found &mdash; sendf.cc</title><meta name="robots" content="noindex">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=optional">
-<style>:root{--bg:#f0fdfa;--text:#134e4a;--text-muted:#5f8a87;--accent:#0d9488;--mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif}*{margin:0;padding:0;box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1rem;text-align:center}h1{font-weight:700;font-size:3rem;margin-bottom:0.5rem}p{color:var(--text-muted);font-size:0.95rem;margin-bottom:1.5rem}a{color:var(--accent);text-decoration:none;font-family:var(--mono);font-size:0.88rem}a:hover{text-decoration:underline}.links{display:flex;gap:1.5rem;justify-content:center}</style>
-</head><body><h1>404</h1><p>This file doesn&rsquo;t exist or has expired.</p>
-<div class="links"><a href="/">Upload a file</a></div></body></html>`, { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    return errorPage(404, 'Not Found', 'This page doesn\u2019t exist.');
   },
 };

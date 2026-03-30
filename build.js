@@ -45,6 +45,22 @@ function buildOgLocaleAlternates(currentLocale) {
     .join('\n');
 }
 
+// Build JSON-LD structured data
+function buildJsonLd(currentLocale) {
+  const ld = {
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: 'sendf.cc',
+    url: DOMAIN,
+    description: currentLocale.metaDesc,
+    applicationCategory: 'UtilityApplication',
+    operatingSystem: 'Any',
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    inLanguage: currentLocale.hreflang,
+  };
+  return '<script type="application/ld+json">' + JSON.stringify(ld) + '</script>';
+}
+
 // Build language picker <option> elements
 function buildLanguageOptions(currentLocale) {
   return locales.map(loc => {
@@ -77,6 +93,7 @@ function stampLocale(loc) {
   html = html.replace(/\{\{hreflangTags\}\}/g, buildHreflangTags(loc));
   html = html.replace(/\{\{ogLocaleAlternates\}\}/g, buildOgLocaleAlternates(loc));
   html = html.replace(/\{\{languageOptions\}\}/g, buildLanguageOptions(loc));
+  html = html.replace(/\{\{jsonLd\}\}/g, buildJsonLd(loc));
   html = html.replace(/\{\{jsStrings\}\}/g, JSON.stringify(loc.js));
 
   return html;

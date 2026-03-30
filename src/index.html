@@ -7,16 +7,26 @@
 <meta name="description" content="{{metaDesc}}">
 <link rel="canonical" href="{{canonicalUrl}}">
 <link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#0d9488">
 <meta property="og:title" content="{{ogTitle}}">
 <meta property="og:description" content="{{ogDesc}}">
 <meta property="og:type" content="website">
 <meta property="og:url" content="{{canonicalUrl}}">
+<meta property="og:image" content="https://sendf.cc/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
 <meta property="og:locale" content="{{ogLocale}}">
 {{ogLocaleAlternates}}
-<meta name="twitter:card" content="summary">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ogTitle}}">
 <meta name="twitter:description" content="{{ogDesc}}">
+<meta name="twitter:image" content="https://sendf.cc/og-image.png">
 {{hreflangTags}}
+{{jsonLd}}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=optional">
@@ -325,14 +335,14 @@
       <div class="progress-text" id="progressText">{{uploading}}&hellip;</div>
     </div>
 
-    <div class="error-msg" id="errorMsg"></div>
+    <div class="error-msg" id="errorMsg" role="alert" aria-live="assertive"></div>
 
     <div class="result" id="result">
       <div class="result-card">
         <div class="result-filename" id="resultFilename"></div>
         <div class="result-url-row">
           <input type="text" class="result-url" id="resultUrl" readonly>
-          <button type="button" class="copy-btn" id="copyBtn">{{copy}}</button>
+          <button type="button" class="copy-btn" id="copyBtn" aria-label="{{copy}}">{{copy}}</button>
         </div>
         <div class="result-meta">
           <span id="resultSize"></span>

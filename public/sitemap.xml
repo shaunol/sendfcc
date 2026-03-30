@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://sendf.cc/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://sendf.cc/"/>
+    <xhtml:link rel="alternate" hreflang="th" href="https://sendf.cc/th/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://sendf.cc/ja/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://sendf.cc/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://sendf.cc/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://sendf.cc/es/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://sendf.cc/"/>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://sendf.cc/th/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://sendf.cc/"/>
+    <xhtml:link rel="alternate" hreflang="th" href="https://sendf.cc/th/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://sendf.cc/ja/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://sendf.cc/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://sendf.cc/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://sendf.cc/es/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://sendf.cc/"/>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://sendf.cc/ja/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://sendf.cc/"/>
+    <xhtml:link rel="alternate" hreflang="th" href="https://sendf.cc/th/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://sendf.cc/ja/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://sendf.cc/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://sendf.cc/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://sendf.cc/es/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://sendf.cc/"/>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://sendf.cc/de/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://sendf.cc/"/>
+    <xhtml:link rel="alternate" hreflang="th" href="https://sendf.cc/th/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://sendf.cc/ja/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://sendf.cc/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://sendf.cc/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://sendf.cc/es/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://sendf.cc/"/>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://sendf.cc/fr/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://sendf.cc/"/>
+    <xhtml:link rel="alternate" hreflang="th" href="https://sendf.cc/th/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://sendf.cc/ja/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://sendf.cc/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://sendf.cc/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://sendf.cc/es/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://sendf.cc/"/>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://sendf.cc/es/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://sendf.cc/"/>
+    <xhtml:link rel="alternate" hreflang="th" href="https://sendf.cc/th/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://sendf.cc/ja/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://sendf.cc/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://sendf.cc/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://sendf.cc/es/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://sendf.cc/"/>
+    <priority>0.8</priority>
+  </url>
+</urlset>
