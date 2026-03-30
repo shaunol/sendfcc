@@ -48,6 +48,18 @@
     --sans: 'DM Sans', sans-serif;
     --radius: 16px;
   }
+  [data-theme="dark"] {
+    --bg: #0f1513;
+    --surface: #1a2320;
+    --text: #d1e7e5;
+    --text-muted: #7a9e9a;
+    --accent: #2dd4bf;
+    --accent-hover: #5eead4;
+    --accent-light: #1a2f2b;
+    --border: #2a3f3a;
+    --green: #4ade80;
+    --red: #f87171;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; display: flex; flex-direction: column; }
   main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 2rem 1rem; }
@@ -308,11 +320,37 @@
   #uploadTs { display:flex; justify-content:center; margin-top:0.75rem; }
   .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
 
+  /* Theme toggle */
+  .theme-toggle {
+    position: absolute;
+    top: 1.25rem;
+    right: 1.25rem;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    width: 34px;
+    height: 34px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    line-height: 1;
+    transition: border-color 0.15s;
+  }
+  .theme-toggle:hover { border-color: var(--accent); }
+
+  /* Dark mode overrides */
+  [data-theme="dark"] .error-msg { background: #2a1515; border-color: #5c2a2a; }
+  [data-theme="dark"] .copy-btn.copied { background: var(--green); color: #0f1513; }
+
   /* Noscript */
   noscript { display: block; text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.9rem; line-height: 1.6; }
 </style>
 </head>
 <body>
+<script>(function(){var t=localStorage.getItem('theme');if(t)document.documentElement.setAttribute('data-theme',t);else if(window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.setAttribute('data-theme','dark')})()</script>
+<button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode"></button>
 <main>
   <div class="container">
     <div class="brand">
@@ -620,6 +658,20 @@ var L = {{jsStrings}};
       fbStatus.textContent = L.feedbackError;
       fbStatus.className = 'feedback-msg err';
     });
+  });
+})();
+
+// Theme toggle
+(function(){
+  var btn = document.getElementById('themeToggle');
+  function getTheme() { return document.documentElement.getAttribute('data-theme') || 'light'; }
+  function setIcon() { btn.textContent = getTheme() === 'dark' ? '\u2600' : '\u263E'; }
+  setIcon();
+  btn.addEventListener('click', function() {
+    var next = getTheme() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    setIcon();
   });
 })();
 </script>

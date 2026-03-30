@@ -258,6 +258,7 @@ async function handleDownload(id, env, request) {
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=optional">
 <style>
   :root{--bg:#f0fdfa;--surface:#fff;--text:#134e4a;--text-muted:#5f8a87;--accent:#0d9488;--accent-hover:#0f766e;--accent-light:#ccfbf1;--border:#d1e7e5;--mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif}
+  [data-theme="dark"]{--bg:#0f1513;--surface:#1a2320;--text:#d1e7e5;--text-muted:#7a9e9a;--accent:#2dd4bf;--accent-hover:#5eead4;--accent-light:#1a2f2b;--border:#2a3f3a;--green:#4ade80;--red:#f87171}
   *{margin:0;padding:0;box-sizing:border-box}
   body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1rem}
   .container{width:100%;max-width:480px;text-align:center}
@@ -269,13 +270,18 @@ async function handleDownload(id, env, request) {
   .filename{font-family:var(--mono);font-size:0.92rem;font-weight:500;word-break:break-all;margin-bottom:0.75rem;text-align:center}
   .meta{display:flex;justify-content:center;gap:1.5rem;font-family:var(--mono);font-size:0.78rem;color:var(--text-muted);margin-bottom:1.25rem}
   .dl-btn{display:block;width:100%;padding:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:10px;font-family:var(--mono);font-size:0.95rem;font-weight:500;cursor:pointer;text-align:center;text-decoration:none;transition:background 0.15s}
+  [data-theme="dark"] .dl-btn{color:#0f1513}
   .dl-btn:hover{background:var(--accent-hover)}
   .footer-links{margin-top:1.5rem;display:flex;justify-content:center;gap:1.5rem;font-family:var(--mono);font-size:0.82rem}
   .footer-links a{color:var(--accent);text-decoration:none}
   .footer-links a:hover{text-decoration:underline}
   .tagline{margin-top:1.25rem;font-size:0.78rem;color:var(--text-muted);text-align:center}
+  .theme-toggle{position:absolute;top:1.25rem;right:1.25rem;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;width:34px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1rem;line-height:1;transition:border-color 0.15s}
+  .theme-toggle:hover{border-color:var(--accent)}
 </style>
 </head><body>
+<script>(function(){var t=localStorage.getItem('theme');if(t)document.documentElement.setAttribute('data-theme',t);else if(window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.setAttribute('data-theme','dark')})()</script>
+<button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode"></button>
 <div class="container">
   <div class="brand"><a href="/">sendf<span class="cc">.cc</span></a></div>
   <div class="card">
@@ -292,6 +298,7 @@ async function handleDownload(id, env, request) {
   </div>
   <div class="tagline">Free temporary file sharing &mdash; files auto-delete after 24 hours</div>
 </div>
+<script>(function(){var btn=document.getElementById('themeToggle');function g(){return document.documentElement.getAttribute('data-theme')||'light'}function s(){btn.textContent=g()==='dark'?'\\u2600':'\\u263E'}s();btn.addEventListener('click',function(){var n=g()==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',n);localStorage.setItem('theme',n);s()})})()</script>
 </body></html>`, {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
