@@ -472,7 +472,7 @@ async function renderDashboardBody(env, url) {
 
   return `
   <h1>Dashboard</h1>
-  <p class="subtitle"><span class="live-dot"></span>sendf.cc &mdash; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/speedtest">speed test</a></p>
+  <p class="subtitle"><span class="live-dot"></span>sendf.cc &mdash; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/bandwidth">bandwidth</a> &middot; <a href="/admin/speedtest">speed test</a></p>
 
   <div class="ext-links">
     <a href="https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain%3Asendf.cc" target="_blank" rel="noopener">Google</a>
@@ -824,7 +824,7 @@ async function handleAdminBandwidth(env, url) {
 </head><body>
 <div class="wrap">
   <h1>Bandwidth</h1>
-  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/speedtest">speed test</a></p>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/speedtest">speed test</a></p>
 
   <div class="range-btns">
     ${[1, 7, 30, 90].map(d => `<a href="/admin/bandwidth${adminQs({days: d})}" class="${d === days ? 'active' : ''}">${d === 1 ? 'Today' : d + 'd'}</a>`).join('')}
@@ -949,7 +949,7 @@ async function handleSpeedTestPage(env) {
 </head><body>
 <div class="wrap">
   <h1>Speed Test</h1>
-  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/bandwidth">bandwidth</a></p>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/bandwidth">bandwidth</a></p>
 
   <div class="controls">
     <button class="btn" id="runBtn" onclick="runTest()">Run Speed Test</button>
@@ -1428,7 +1428,7 @@ async function handleAdminFeedback(env, url) {
 <body>
 <div class="wrap">
   <h1>Feedback</h1>
-  <p class="subtitle"><a href="/admin">&larr; Dashboard</a></p>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/bandwidth">bandwidth</a> &middot; <a href="/admin/speedtest">speed test</a></p>
   <form class="filters" method="GET" action="/admin/feedback">
     <div><label for="fPage">Page</label><input type="text" id="fPage" name="page" value="${esc(page)}" placeholder="/"></div>
     <div><label for="fLimit">Per page</label><select id="fLimit" name="limit">${[25,50,100,200].map(n => `<option value="${n}"${limit === n ? ' selected' : ''}>${n}</option>`).join('')}</select></div>
@@ -1519,7 +1519,7 @@ async function handleAdminFiles(env, url) {
 </style></head>
 <body><div class="wrap">
   <h1>Files</h1>
-  <p class="subtitle"><a href="/admin">&larr; Dashboard</a></p>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/bandwidth">bandwidth</a> &middot; <a href="/admin/speedtest">speed test</a></p>
   <div class="stats">${total} file${total !== 1 ? 's' : ''} &middot; page ${currentPage} of ${Math.max(totalPages, 1)}</div>
   ${files.length === 0 ? '<div class="empty">No files yet.</div>' : `
   <table><thead><tr><th>ID</th><th>Filename</th><th>Size</th><th>Node</th><th>Country</th><th>Status</th><th>Uploaded</th></tr></thead>
@@ -1589,7 +1589,7 @@ async function handleAdminFileDetail(fileId, env) {
 </style></head>
 <body><div class="wrap">
   <h1>File Detail</h1>
-  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a></p>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/bandwidth">bandwidth</a> &middot; <a href="/admin/speedtest">speed test</a></p>
 
   <div class="msg-card">
     <div class="msg-header">
