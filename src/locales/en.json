@@ -32,6 +32,8 @@
   "noscriptText": "sendf.cc is a free temporary file sharing service. Upload a file and get a short link that expires in 24 hours. No signup required. JavaScript is needed for the upload functionality.",
   "footerText": "Files are stored temporarily and auto-deleted after 24 hours.",
 
+  "expiryLabel": "Expires in",
+
   "feedbackToggle": "Send feedback",
   "feedbackPlaceholder": "What could we do better?",
   "feedbackSubmit": "Send",

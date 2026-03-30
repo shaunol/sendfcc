@@ -32,6 +32,8 @@
   "noscriptText": "sendf.cc ist ein kostenloser temporärer Dateifreigabedienst. Laden Sie eine Datei hoch und erhalten Sie einen kurzen Link, der nach 24 Stunden abläuft. Keine Registrierung erforderlich. JavaScript wird für die Upload-Funktion benötigt.",
   "footerText": "Dateien werden temporär gespeichert und nach 24 Stunden automatisch gelöscht.",
 
+  "expiryLabel": "Läuft ab in",
+
   "feedbackToggle": "Feedback senden",
   "feedbackPlaceholder": "Was könnten wir verbessern?",
   "feedbackSubmit": "Senden",

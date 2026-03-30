@@ -80,6 +80,7 @@ function stampLocale(loc) {
     'fileExpired', 'uploadAnother', 'expires', 'copy', 'copied',
     'featuresHeading', 'feature1', 'feature2', 'feature3', 'feature4',
     'noscriptText', 'footerText',
+    'expiryLabel',
     'feedbackToggle', 'feedbackPlaceholder', 'feedbackSubmit',
   ];
 

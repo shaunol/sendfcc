@@ -32,6 +32,8 @@
   "noscriptText": "sendf.ccは無料の一時ファイル共有サービスです。ファイルをアップロードして24時間で期限切れになる短いリンクを取得できます。登録不要。アップロード機能にはJavaScriptが必要です。",
   "footerText": "ファイルは一時的に保存され、24時間後に自動削除されます。",
 
+  "expiryLabel": "有効期限",
+
   "feedbackToggle": "フィードバックを送信",
   "feedbackPlaceholder": "改善点はありますか？",
   "feedbackSubmit": "送信",

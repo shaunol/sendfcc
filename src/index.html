@@ -317,6 +317,26 @@
   .feedback-msg.ok { color: var(--green); }
   .feedback-msg.err { color: var(--red); }
 
+  .expiry-picker {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+  .expiry-picker select {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    padding: 0.25rem 0.5rem;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
   #uploadTs { display:flex; justify-content:center; margin-top:0.75rem; }
   .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
 
@@ -367,6 +387,17 @@
       </div>
       <div class="dropzone-limit">{{dropLimit}}</div>
       <input type="file" id="fileInput" aria-label="{{selectFile}}">
+    </div>
+
+    <div class="expiry-picker">
+      <label for="expirySelect" class="sr-only">{{expiryLabel}}</label>
+      <span class="expiry-label">{{expiryLabel}}</span>
+      <select id="expirySelect">
+        <option value="1">1h</option>
+        <option value="6">6h</option>
+        <option value="12">12h</option>
+        <option value="24" selected>24h</option>
+      </select>
     </div>
 
     <div id="uploadTs"></div>
@@ -530,6 +561,8 @@ var L = {{jsStrings}};
     var formData = new FormData();
     formData.append('file', file);
     formData.append('token', uploadToken || '');
+    var ttl = document.getElementById('expirySelect').value;
+    if (ttl && ttl !== '24') formData.append('ttl', ttl);
 
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/upload');

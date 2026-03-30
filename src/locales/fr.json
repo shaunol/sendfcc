@@ -32,6 +32,8 @@
   "noscriptText": "sendf.cc est un service gratuit de partage de fichiers temporaire. Envoyez un fichier et obtenez un lien court qui expire en 24 heures. Sans inscription. JavaScript est nécessaire pour la fonctionnalité d\u2019envoi.",
   "footerText": "Les fichiers sont stockés temporairement et supprimés après 24 heures.",
 
+  "expiryLabel": "Expire dans",
+
   "feedbackToggle": "Envoyer un commentaire",
   "feedbackPlaceholder": "Que pourrions-nous améliorer ?",
   "feedbackSubmit": "Envoyer",

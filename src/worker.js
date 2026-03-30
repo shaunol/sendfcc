@@ -102,6 +102,7 @@ async function handleUpload(request, env, ctx) {
   const formData = await request.formData();
   const file = formData.get('file');
   const token = formData.get('token');
+  const ttlHours = Math.min(Math.max(parseInt(formData.get('ttl') || '24', 10), 1), 24);
 
   if (!file || !file.name) return json({ error: 'No file provided' }, 400);
   if (!token) return json({ error: 'Verification token required' }, 400);
@@ -168,7 +169,7 @@ async function handleUpload(request, env, ctx) {
 
   // Store metadata
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + FILE_TTL_HOURS * 3600000);
+  const expiresAt = new Date(now.getTime() + ttlHours * 3600000);
   const country = (request.headers.get('CF-IPCountry') || '').slice(0, 10);
 
   await env.DB.prepare(
@@ -295,10 +296,19 @@ async function handleDownload(id, env, request) {
   </div>
   <div class="footer-links">
     <a href="/">Upload a file</a>
+    <a href="#" id="reportLink" style="color:var(--text-muted);font-size:0.75rem">Report abuse</a>
   </div>
   <div class="tagline">Free temporary file sharing &mdash; files auto-delete after 24 hours</div>
+  <div id="reportForm" style="display:none;margin-top:1rem;max-width:480px;width:100%">
+    <textarea id="reportMsg" rows="3" placeholder="Describe the issue..." style="width:100%;padding:0.5rem;border:1.5px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:0.82rem;background:var(--surface);color:var(--text);resize:vertical"></textarea>
+    <button type="button" id="reportSubmit" style="margin-top:0.35rem;width:100%;padding:0.5rem;background:var(--red,#dc2626);color:#fff;border:none;border-radius:8px;font-family:var(--mono);font-size:0.82rem;cursor:pointer">Submit Report</button>
+    <div id="reportStatus" style="font-family:var(--mono);font-size:0.78rem;color:var(--text-muted);text-align:center;margin-top:0.35rem"></div>
+  </div>
 </div>
-<script>(function(){var btn=document.getElementById('themeToggle');function g(){return document.documentElement.getAttribute('data-theme')||'light'}function s(){btn.textContent=g()==='dark'?'\\u2600':'\\u263E'}s();btn.addEventListener('click',function(){var n=g()==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',n);localStorage.setItem('theme',n);s()})})()</script>
+<script>
+(function(){var btn=document.getElementById('themeToggle');function g(){return document.documentElement.getAttribute('data-theme')||'light'}function s(){btn.textContent=g()==='dark'?'\\u2600':'\\u263E'}s();btn.addEventListener('click',function(){var n=g()==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',n);localStorage.setItem('theme',n);s()})})();
+(function(){var link=document.getElementById('reportLink'),form=document.getElementById('reportForm'),msg=document.getElementById('reportMsg'),sub=document.getElementById('reportSubmit'),st=document.getElementById('reportStatus');link.addEventListener('click',function(e){e.preventDefault();form.style.display=form.style.display==='none'?'block':'none'});sub.addEventListener('click',function(){if(!msg.value.trim())return;sub.disabled=true;st.textContent='Sending...';fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'[ABUSE REPORT] File: ${id}\\n'+msg.value,page:'/${id}',token:''})}).then(function(r){if(r.ok||r.status===403){st.textContent='Report submitted. We will review this file.';form.querySelector('textarea').style.display='none';sub.style.display='none'}else{st.textContent='Failed to submit. Please try again.';sub.disabled=false}}).catch(function(){st.textContent='Failed to submit. Please try again.';sub.disabled=false})})})();
+</script>
 </body></html>`, {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
