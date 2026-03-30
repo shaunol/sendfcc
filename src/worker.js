@@ -136,6 +136,17 @@ async function handleUpload(request, env, ctx) {
   const node = await pickNode(env, continent);
   if (!node) return json({ error: 'No storage nodes available' }, 503);
 
+  // Check disk space (reject if >90% full)
+  try {
+    const statsRes = await fetch(node.url + '/stats', { signal: AbortSignal.timeout(3000) });
+    if (statsRes.ok) {
+      const stats = await statsRes.json();
+      if (stats.disk_total > 0 && stats.disk_used / stats.disk_total > 0.9) {
+        return json({ error: 'We\'re a bit overloaded right now. Please try again in an hour.' }, 503);
+      }
+    }
+  } catch {}
+
   // Generate IDs
   const id = shortId();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
