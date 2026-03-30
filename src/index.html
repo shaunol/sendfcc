@@ -305,6 +305,7 @@
   .feedback-msg.ok { color: var(--green); }
   .feedback-msg.err { color: var(--red); }
 
+  #uploadTs { display:flex; justify-content:center; margin-top:0.75rem; }
   .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
 
   /* Noscript */
@@ -329,6 +330,8 @@
       <div class="dropzone-limit">{{dropLimit}}</div>
       <input type="file" id="fileInput" aria-label="{{selectFile}}">
     </div>
+
+    <div id="uploadTs"></div>
 
     <div class="progress-wrap" id="progressWrap">
       <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
@@ -451,7 +454,7 @@ var L = {{jsStrings}};
   }
 
   // Load upload Turnstile on page load
-  loadTurnstile('dropzone', function(token) { uploadToken = token; });
+  loadTurnstile('uploadTs', function(token) { uploadToken = token; });
 
   function formatBytes(b) {
     if (b < 1024) return b + ' B';
