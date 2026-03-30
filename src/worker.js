@@ -271,13 +271,37 @@ async function renderDashboardBody(env, url) {
   if (filterCountry) { where += ' AND country = ?'; baseParams.push(filterCountry); }
   const whereNoEmpty = where + (filterCountry ? '' : " AND country != ''");
 
-  const [totalHits, topPaths, topCountries, allHourly, feedbackCount, fileStats] = await Promise.all([
+  // Fetch node stats in parallel with DB queries
+  const configRaw = await env.NODES.get('config');
+  const nodesList = configRaw ? JSON.parse(configRaw) : [];
+  const nodeStatsPromises = nodesList.map(async (node) => {
+    try {
+      const r = await fetch(node.url + '/stats', { signal: AbortSignal.timeout(3000) });
+      if (!r.ok) return { id: node.id, url: node.url, status: 'down' };
+      const stats = await r.json();
+      // Calculate bandwidth rate from previous reading
+      const prevRaw = await env.NODES.get('bw:' + node.id);
+      const prev = prevRaw ? JSON.parse(prevRaw) : null;
+      let rxRate = 0, txRate = 0;
+      if (prev && stats.ts > prev.ts) {
+        const dt = stats.ts - prev.ts;
+        rxRate = Math.round((stats.rx - prev.rx) / dt);
+        txRate = Math.round((stats.tx - prev.tx) / dt);
+      }
+      // Store current reading for next rate calculation
+      await env.NODES.put('bw:' + node.id, JSON.stringify({ ts: stats.ts, rx: stats.rx, tx: stats.tx }));
+      return { ...stats, id: node.id, url: node.url, continent: node.continent, status: 'up', rxRate, txRate };
+    } catch { return { id: node.id, url: node.url, status: 'down' }; }
+  });
+
+  const [totalHits, topPaths, topCountries, allHourly, feedbackCount, fileStats, ...nodeStats] = await Promise.all([
     env.DB.prepare('SELECT SUM(hits) as total FROM request_stats WHERE ' + where).bind(...baseParams).first(),
     env.DB.prepare('SELECT path, SUM(hits) as total FROM request_stats WHERE ' + where + ' GROUP BY path ORDER BY total DESC LIMIT 30').bind(...baseParams).all(),
     env.DB.prepare('SELECT country, SUM(hits) as total FROM request_stats WHERE ' + whereNoEmpty + ' GROUP BY country ORDER BY total DESC LIMIT 20').bind(...baseParams).all(),
     env.DB.prepare('SELECT date, hour, SUM(hits) as total FROM request_stats WHERE ' + where + ' GROUP BY date, hour').bind(...baseParams).all(),
     env.DB.prepare('SELECT COUNT(*) as total FROM feedback').first(),
     env.DB.prepare('SELECT COUNT(*) as cnt, COALESCE(SUM(size),0) as total_size FROM files WHERE expires_at > datetime("now")').first(),
+    ...nodeStatsPromises,
   ]);
 
   const total = totalHits?.total || 0;
@@ -411,6 +435,35 @@ async function renderDashboardBody(env, url) {
     </div>
   </div>
 
+  <h2>Storage Nodes</h2>
+  ${nodeStats.length === 0 ? '<div class="empty">No nodes configured</div>' : `
+  <div class="nodes-grid">
+    ${nodeStats.map(n => `
+    <div class="node-card ${n.status === 'up' ? '' : 'node-down'}">
+      <div class="node-header">
+        <span class="node-dot ${n.status === 'up' ? 'dot-up' : 'dot-down'}"></span>
+        <strong>${esc(n.id)}</strong>
+        <span class="node-region">${esc(n.continent || '')}</span>
+      </div>
+      ${n.status === 'up' ? `
+      <div class="node-bw">
+        <div class="bw-row"><span class="bw-label">&darr; RX</span><span class="bw-val">${formatBytes(n.rxRate || 0)}/s</span></div>
+        <div class="bw-row"><span class="bw-label">&uarr; TX</span><span class="bw-val">${formatBytes(n.txRate || 0)}/s</span></div>
+      </div>
+      <div class="node-meta">
+        <span>Disk: ${formatBytes(n.disk_used || 0)} / ${formatBytes(n.disk_total || 0)}</span>
+        <span>Files: ${n.files || 0}</span>
+        <span>Load: ${esc(String(n.load || '?'))}</span>
+        <span>Up: ${esc(n.uptime || '?')}</span>
+      </div>
+      <div class="bw-totals">
+        <span>Total RX: ${formatBytes(n.rx || 0)}</span>
+        <span>Total TX: ${formatBytes(n.tx || 0)}</span>
+      </div>
+      ` : '<div class="node-meta"><span>Node unreachable</span></div>'}
+    </div>`).join('')}
+  </div>`}
+
   <h2>Popular Routes</h2>
   ${paths.length === 0 ? '<div class="empty">No data yet</div>' : `
   <table>
@@ -498,6 +551,7 @@ export class DashboardHub {
   async alarm() {
     this.pendingBroadcast = false;
     const sockets = this.state.getWebSockets();
+    if (sockets.length === 0) return;
     for (const ws of sockets) {
       try {
         const params = ws.deserializeAttachment() || '';
@@ -505,6 +559,10 @@ export class DashboardHub {
         const body = await renderDashboardBody(this.env, url);
         ws.send(JSON.stringify({ html: body }));
       } catch (e) { try { ws.close(); } catch (_) {} }
+    }
+    // Keep refreshing every 5 seconds for live bandwidth monitoring
+    if (this.state.getWebSockets().length > 0) {
+      this.state.storage.setAlarm(Date.now() + 5000);
     }
   }
 
@@ -586,6 +644,20 @@ async function handleAdminDashboard(env, url) {
   .btn { padding:0.4rem 1rem; border:none; border-radius:8px; font-family:var(--mono); font-size:0.82rem; cursor:pointer; text-decoration:none; display:inline-block; }
   .btn-danger { background:var(--red, #dc2626); color:#fff; }
   .btn-danger:hover { opacity:0.85; }
+  .nodes-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:0.75rem; margin-bottom:1rem; }
+  .node-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:1rem; }
+  .node-card.node-down { opacity:0.5; border-color:var(--red, #dc2626); }
+  .node-header { display:flex; align-items:center; gap:0.5rem; margin-bottom:0.6rem; font-family:var(--mono); font-size:0.85rem; }
+  .node-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .dot-up { background:var(--green); animation:pulse 2s infinite; }
+  .dot-down { background:var(--red, #dc2626); }
+  .node-region { font-size:0.7rem; color:var(--text-muted); margin-left:auto; }
+  .node-bw { display:grid; grid-template-columns:1fr 1fr; gap:0.35rem; margin-bottom:0.6rem; }
+  .bw-row { display:flex; justify-content:space-between; background:var(--bg); padding:0.35rem 0.5rem; border-radius:6px; }
+  .bw-label { font-family:var(--mono); font-size:0.72rem; color:var(--text-muted); }
+  .bw-val { font-family:var(--mono); font-size:0.78rem; font-weight:500; color:var(--accent); }
+  .node-meta { display:flex; flex-wrap:wrap; gap:0.35rem 0.75rem; font-family:var(--mono); font-size:0.72rem; color:var(--text-muted); margin-bottom:0.4rem; }
+  .bw-totals { display:flex; gap:0.75rem; font-family:var(--mono); font-size:0.72rem; color:var(--text-muted); padding-top:0.4rem; border-top:1px dashed var(--border); }
   .empty { text-align:center; padding:2rem; color:var(--text-muted); font-family:var(--mono); font-size:0.85rem; }
   .ext-links { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1.25rem; }
   .ext-links a { font-family:var(--mono); font-size:0.7rem; padding:0.25rem 0.6rem; border:1px solid var(--border); border-radius:6px; text-decoration:none; color:var(--text-muted); background:var(--surface); }
@@ -957,21 +1029,33 @@ function html(body, lang, request) {
 
 export default {
   async scheduled(event, env, ctx) {
-    // Health check all storage nodes
+    // Health check all storage nodes + store bandwidth snapshots
     const configRaw = await env.NODES.get('config');
     if (configRaw) {
       const nodes = JSON.parse(configRaw);
+      const ts = new Date().toISOString().replace(/:\d{2}\.\d{3}Z$/, ':00Z'); // round to minute
       for (const node of nodes) {
         const start = Date.now();
         try {
-          const r = await fetch(node.url + '/health', { signal: AbortSignal.timeout(5000) });
-          const body = await r.text().catch(() => '');
+          const r = await fetch(node.url + '/stats', { signal: AbortSignal.timeout(5000) });
+          if (!r.ok) throw new Error('not ok');
+          const stats = await r.json();
           await env.NODES.put(node.id, JSON.stringify({
-            status: r.ok ? 'up' : 'down',
+            status: 'up',
             latency: Date.now() - start,
-            info: body.slice(0, 200),
             checked: Date.now(),
           }));
+          // Store bandwidth snapshot for historical charts
+          const prevRaw = await env.NODES.get('cron:' + node.id);
+          const prev = prevRaw ? JSON.parse(prevRaw) : null;
+          if (prev && stats.ts > prev.ts) {
+            const rxDelta = Math.max(stats.rx - prev.rx, 0);
+            const txDelta = Math.max(stats.tx - prev.tx, 0);
+            await env.DB.prepare(
+              'INSERT OR REPLACE INTO node_bandwidth (ts, node, rx_bytes, tx_bytes, disk_used, file_count) VALUES (?, ?, ?, ?, ?, ?)'
+            ).bind(ts, node.id, rxDelta, txDelta, stats.disk_used || 0, stats.files || 0).run();
+          }
+          await env.NODES.put('cron:' + node.id, JSON.stringify({ ts: stats.ts, rx: stats.rx, tx: stats.tx }));
         } catch {
           await env.NODES.put(node.id, JSON.stringify({ status: 'down', checked: Date.now() }));
         }
