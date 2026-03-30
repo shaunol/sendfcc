@@ -1231,6 +1231,12 @@ async function runTest() {
 // ── Admin Dashboard Page Shell ──
 
 async function handleAdminDashboard(env, url) {
+  // Redirect to add timezone param if missing (avoids UTC flash on first load)
+  if (!url.searchParams.has('tzo')) {
+    return new Response(`<script>var u=new URL(location.href);u.searchParams.set('tzo',new Date().getTimezoneOffset());location.replace(u)</script>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+  }
   const body = await renderDashboardBody(env, url);
   return new Response(`<!DOCTYPE html>
 <html lang="en">
