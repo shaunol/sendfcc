@@ -202,9 +202,9 @@ function errorPage(status, heading, message) {
   });
 }
 
-// ── Download Redirect ──
+// ── Download Page ──
 
-async function handleDownload(id, env) {
+async function handleDownload(id, env, request) {
   const row = await env.DB.prepare(
     'SELECT node, filename, size, mime, expires_at FROM files WHERE id = ?'
   ).bind(id).first();
@@ -220,14 +220,65 @@ async function handleDownload(id, env) {
   const configRaw = await env.NODES.get('config');
   const nodes = configRaw ? JSON.parse(configRaw) : [];
   const node = nodes.find(n => n.id === row.node);
-  if (!node) return json({ error: 'Storage node unavailable' }, 503);
+  if (!node) return errorPage(503, 'Unavailable', 'The storage node is temporarily unavailable.');
 
-  // 302 redirect to storage node (CF never proxies file bytes)
-  return new Response(null, {
-    status: 302,
+  const fileUrl = node.url + '/files/' + id + '/' + row.filename;
+  const expiresAt = new Date(row.expires_at);
+  const remaining = Math.max(0, expiresAt.getTime() - Date.now());
+  const hoursLeft = Math.floor(remaining / 3600000);
+  const minsLeft = Math.floor((remaining % 3600000) / 60000);
+  const timeLeft = hoursLeft > 0 ? hoursLeft + 'h ' + minsLeft + 'm' : minsLeft + 'm';
+
+  return new Response(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${esc(row.filename)} &mdash; sendf.cc</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=optional">
+<style>
+  :root{--bg:#f0fdfa;--surface:#fff;--text:#134e4a;--text-muted:#5f8a87;--accent:#0d9488;--accent-hover:#0f766e;--accent-light:#ccfbf1;--border:#d1e7e5;--mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1rem}
+  .container{width:100%;max-width:480px;text-align:center}
+  .brand{font-size:1.2rem;font-weight:700;margin-bottom:2rem}
+  .brand .cc{color:var(--accent)}
+  .brand a{color:inherit;text-decoration:none}
+  .card{background:var(--surface);border:1.5px solid var(--border);border-radius:16px;padding:1.5rem;text-align:left}
+  .file-icon{font-size:2rem;margin-bottom:0.75rem;text-align:center}
+  .filename{font-family:var(--mono);font-size:0.92rem;font-weight:500;word-break:break-all;margin-bottom:0.75rem;text-align:center}
+  .meta{display:flex;justify-content:center;gap:1.5rem;font-family:var(--mono);font-size:0.78rem;color:var(--text-muted);margin-bottom:1.25rem}
+  .dl-btn{display:block;width:100%;padding:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:10px;font-family:var(--mono);font-size:0.95rem;font-weight:500;cursor:pointer;text-align:center;text-decoration:none;transition:background 0.15s}
+  .dl-btn:hover{background:var(--accent-hover)}
+  .footer-links{margin-top:1.5rem;display:flex;justify-content:center;gap:1.5rem;font-family:var(--mono);font-size:0.82rem}
+  .footer-links a{color:var(--accent);text-decoration:none}
+  .footer-links a:hover{text-decoration:underline}
+  .tagline{margin-top:1.25rem;font-size:0.78rem;color:var(--text-muted);text-align:center}
+</style>
+</head><body>
+<div class="container">
+  <div class="brand"><a href="/">sendf<span class="cc">.cc</span></a></div>
+  <div class="card">
+    <div class="file-icon" aria-hidden="true">&#128196;</div>
+    <div class="filename">${esc(row.filename)}</div>
+    <div class="meta">
+      <span>${formatBytes(row.size)}</span>
+      <span>Expires in ${timeLeft}</span>
+    </div>
+    <a class="dl-btn" href="${esc(fileUrl)}" download>Download</a>
+  </div>
+  <div class="footer-links">
+    <a href="/">Upload a file</a>
+  </div>
+  <div class="tagline">Free temporary file sharing &mdash; files auto-delete after 24 hours</div>
+</div>
+</body></html>`, {
     headers: {
-      'Location': node.url + '/files/' + id + '/' + row.filename,
+      'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
     },
   });
 }
@@ -606,69 +657,242 @@ export class DashboardHub {
   webSocketError(ws) { try { ws.close(); } catch (_) {} }
 }
 
-// ── Speed Test ──
+// ── Bandwidth History Page ──
 
-async function handleSpeedTest(env) {
+async function handleAdminBandwidth(env, url) {
+  const days = parseInt(url.searchParams.get('days') || '7', 10);
+  const filterNode = url.searchParams.get('node') || '';
+  const tzo = parseInt(url.searchParams.get('tzo') || '0', 10);
+  const offsetH = -Math.round(tzo / 60);
+  const since = new Date(Date.now() - (days + 1) * 86400000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  let where = 'ts >= ?';
+  const params = [since];
+  if (filterNode) { where += ' AND node = ?'; params.push(filterNode); }
+
+  const rows = await env.DB.prepare(
+    'SELECT ts, node, rx_bytes, tx_bytes, disk_used, file_count FROM node_bandwidth WHERE ' + where + ' ORDER BY ts ASC'
+  ).bind(...params).all();
+  const data = rows?.results || [];
+
+  // Get node list
   const configRaw = await env.NODES.get('config');
-  const nodes = configRaw ? JSON.parse(configRaw) : [];
-  const results = [];
+  const nodesList = configRaw ? JSON.parse(configRaw) : [];
 
-  for (const node of nodes) {
-    const result = { id: node.id, url: node.url, continent: node.continent };
+  // Aggregate by local hour and local day
+  const hourlyMap = new Map();
+  const dailyMap = new Map();
+  const localNow = new Date(Date.now() + offsetH * 3600000);
+  const localToday = localNow.toISOString().split('T')[0];
 
-    // Test 1: Latency (health endpoint)
-    try {
-      const start = Date.now();
-      const r = await fetch(node.url + '/health', { signal: AbortSignal.timeout(5000) });
-      result.latency = Date.now() - start;
-      result.healthOk = r.ok;
-    } catch {
-      result.latency = -1;
-      result.healthOk = false;
+  for (const r of data) {
+    const utcMs = new Date(r.ts).getTime();
+    const localMs = utcMs + offsetH * 3600000;
+    const ld = new Date(localMs);
+    const localDate = ld.toISOString().split('T')[0];
+    const localH = String(ld.getUTCHours()).padStart(2, '0');
+
+    // Daily
+    const dKey = localDate;
+    const dEntry = dailyMap.get(dKey) || { rx: 0, tx: 0 };
+    dEntry.rx += r.rx_bytes;
+    dEntry.tx += r.tx_bytes;
+    dailyMap.set(dKey, dEntry);
+
+    // Hourly (today only)
+    if (localDate === localToday) {
+      const hKey = localH;
+      const hEntry = hourlyMap.get(hKey) || { rx: 0, tx: 0 };
+      hEntry.rx += r.rx_bytes;
+      hEntry.tx += r.tx_bytes;
+      hourlyMap.set(hKey, hEntry);
     }
-
-    // Test 2: Download speed (fetch stats.json — small payload, measures TTFB + transfer)
-    try {
-      const start = Date.now();
-      const r = await fetch(node.url + '/stats', { signal: AbortSignal.timeout(5000) });
-      const body = await r.text();
-      result.downloadMs = Date.now() - start;
-      result.downloadBytes = body.length;
-    } catch {
-      result.downloadMs = -1;
-      result.downloadBytes = 0;
-    }
-
-    // Test 3: Upload speed (PUT a 100KB test payload)
-    try {
-      const testData = new Uint8Array(102400); // 100KB of zeros
-      const testId = '_speedtest_' + Date.now();
-      const start = Date.now();
-      const r = await fetch(node.url + '/files/' + testId + '/test.bin', {
-        method: 'PUT',
-        body: testData,
-        headers: { 'X-Upload-Key': env.UPLOAD_KEY, 'Content-Type': 'application/octet-stream' },
-        signal: AbortSignal.timeout(10000),
-      });
-      result.uploadMs = Date.now() - start;
-      result.uploadOk = r.ok;
-      result.uploadBytes = 102400;
-      // Clean up test file
-      fetch(node.url + '/files/' + testId + '/test.bin', {
-        method: 'DELETE',
-        headers: { 'X-Upload-Key': env.UPLOAD_KEY },
-        signal: AbortSignal.timeout(3000),
-      }).catch(() => {});
-    } catch {
-      result.uploadMs = -1;
-      result.uploadOk = false;
-    }
-
-    results.push(result);
   }
 
-  return json({ results, colo: '', ts: Date.now() });
+  // Build arrays
+  const daily = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const ds = new Date(localNow.getTime() - i * 86400000).toISOString().split('T')[0];
+    const d = dailyMap.get(ds) || { rx: 0, tx: 0 };
+    daily.push({ date: ds, rx: d.rx, tx: d.tx });
+  }
+  const hourly = [];
+  for (let h = 0; h < 24; h++) {
+    const hh = String(h).padStart(2, '0');
+    const d = hourlyMap.get(hh) || { rx: 0, tx: 0 };
+    hourly.push({ hour: hh, rx: d.rx, tx: d.tx });
+  }
+
+  // Totals
+  const totalRx = daily.reduce((s, d) => s + d.rx, 0);
+  const totalTx = daily.reduce((s, d) => s + d.tx, 0);
+
+  // Latest disk/file stats
+  const latestRow = data.length > 0 ? data[data.length - 1] : null;
+
+  function buildBwChart(items, labelFn, getVal) {
+    const W = 300, H = 120;
+    const pad = { top: 14, right: 8, bottom: 22, left: 42 };
+    const cw = W - pad.left - pad.right;
+    const ch = H - pad.top - pad.bottom;
+    const max = Math.max(...items.map(getVal), 1);
+    const n = items.length;
+    const gap = n > 15 ? 1 : 2;
+    const barW = Math.max((cw - gap * (n - 1)) / n, 1);
+    let svg = '';
+    for (let i = 0; i <= 3; i++) {
+      const val = max * i / 3;
+      const y = (pad.top + ch - (i / 3) * ch).toFixed(1);
+      svg += '<line x1="' + pad.left + '" y1="' + y + '" x2="' + (W - pad.right) + '" y2="' + y + '" stroke="#d1e7e5" stroke-width="0.5"/>';
+      svg += '<text x="' + (pad.left - 4) + '" y="' + (+y + 3).toFixed(1) + '" text-anchor="end" fill="#5f8a87" font-size="6" font-family="DM Mono,monospace">' + formatBytes(Math.round(val)) + '</text>';
+    }
+    items.forEach((d, i) => {
+      const v = getVal(d);
+      const barH = max > 0 ? (v / max) * ch : 0;
+      const x = pad.left + i * (barW + gap);
+      const y = pad.top + ch - barH;
+      svg += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + barH.toFixed(1) + '" rx="1" fill="#0d9488" opacity="' + (v > 0 ? '0.4' : '0.08') + '"><title>' + labelFn(d) + ': ' + formatBytes(v) + '</title></rect>';
+    });
+    const labelCount = n <= 10 ? n : n <= 24 ? 6 : 7;
+    const step = Math.max(Math.floor(n / labelCount), 1);
+    for (let i = 0; i < n; i += step) {
+      const x = pad.left + i * (barW + gap) + barW / 2;
+      const rawLabel = labelFn(items[i]);
+      const shortLabel = rawLabel.length > 5 ? rawLabel.slice(8) + '/' + rawLabel.slice(5, 7) : rawLabel;
+      svg += '<text x="' + x.toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" fill="#5f8a87" font-size="6.5" font-family="DM Mono,monospace">' + shortLabel + '</text>';
+    }
+    return '<svg width="100%" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">' + svg + '</svg>';
+  }
+
+  function adminQs(overrides) {
+    const p = new URLSearchParams();
+    const d = overrides.days !== undefined ? overrides.days : days;
+    const fn = overrides.node !== undefined ? overrides.node : filterNode;
+    if (d && d !== 7) p.set('days', d);
+    if (fn) p.set('node', fn);
+    const s = p.toString();
+    return s ? '?' + s : '';
+  }
+
+  return new Response(`<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bandwidth &mdash; sendf.cc admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=optional">
+<style>
+  :root { --bg:#f0fdfa; --surface:#fff; --text:#134e4a; --text-muted:#5f8a87; --accent:#0d9488; --accent-light:#ccfbf1; --border:#d1e7e5; --green:#16a34a; --green-light:#f0fdf4; --red:#dc2626; --mono:'DM Mono',monospace; --sans:'DM Sans',sans-serif; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; padding:2rem 1rem; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { font-weight:700; font-size:1.6rem; margin-bottom:0.25rem; }
+  h2 { font-weight:600; font-size:1.1rem; margin:1.5rem 0 0.75rem; }
+  .subtitle { color:var(--text-muted); font-size:0.88rem; margin-bottom:1.5rem; }
+  .subtitle a { color:var(--accent); text-decoration:none; }
+  .subtitle a:hover { text-decoration:underline; }
+  .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.75rem; margin-bottom:0.5rem; }
+  .stat-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:1rem; }
+  .stat-card .label { font-family:var(--mono); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin-bottom:0.3rem; }
+  .stat-card .num { font-family:var(--mono); font-size:1.8rem; font-weight:500; color:var(--accent); }
+  .stat-card .num.green { color:var(--green); }
+  .range-btns { display:flex; gap:0.35rem; margin-bottom:1.25rem; flex-wrap:wrap; }
+  .range-btns a { font-family:var(--mono); font-size:0.72rem; padding:0.25rem 0.6rem; border:1px solid var(--border); border-radius:6px; text-decoration:none; color:var(--text-muted); }
+  .range-btns a.active, .range-btns a:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .node-btns { display:flex; gap:0.35rem; margin-bottom:1.25rem; flex-wrap:wrap; }
+  .node-btns a { font-family:var(--mono); font-size:0.72rem; padding:0.25rem 0.6rem; border:1px solid var(--border); border-radius:6px; text-decoration:none; color:var(--text-muted); }
+  .node-btns a.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .chart-row { display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-bottom:0.5rem; }
+  .chart-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:0.75rem; }
+  .chart-label { font-family:var(--mono); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin-bottom:0.4rem; }
+  table { width:100%; border-collapse:collapse; font-size:0.85rem; margin-bottom:1rem; }
+  thead th { text-align:left; padding:0.5rem 0.75rem; font-family:var(--mono); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); border-bottom:2px solid var(--border); font-weight:500; }
+  thead th.right { text-align:right; }
+  tbody td { padding:0.5rem 0.75rem; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:0.8rem; }
+  tbody tr:hover { background:var(--accent-light); }
+  .td-right { text-align:right; }
+  @media(max-width:700px) {
+    .chart-row { grid-template-columns:1fr; }
+    .stats-grid { grid-template-columns:repeat(2, 1fr); }
+    table, thead, tbody, tr, td, th { display:block; }
+    thead { display:none; }
+    tbody tr { padding:0.6rem; margin-bottom:0.5rem; background:var(--surface); border:1px solid var(--border); border-radius:10px; }
+    tbody td { padding:0.15rem 0; border:none; }
+    tbody td::before { content:attr(data-label); font-family:var(--mono); font-size:0.65rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); display:block; margin-bottom:0.1rem; }
+  }
+</style>
+</head><body>
+<div class="wrap">
+  <h1>Bandwidth</h1>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/speedtest">speed test</a></p>
+
+  <div class="range-btns">
+    ${[1, 7, 30, 90].map(d => `<a href="/admin/bandwidth${adminQs({days: d})}" class="${d === days ? 'active' : ''}">${d === 1 ? 'Today' : d + 'd'}</a>`).join('')}
+  </div>
+
+  ${nodesList.length > 1 ? `<div class="node-btns">
+    <a href="/admin/bandwidth${adminQs({node: ''})}" class="${!filterNode ? 'active' : ''}">All</a>
+    ${nodesList.map(n => `<a href="/admin/bandwidth${adminQs({node: n.id})}" class="${filterNode === n.id ? 'active' : ''}">${esc(n.id)}</a>`).join('')}
+  </div>` : ''}
+
+  <div class="stats-grid">
+    <div class="stat-card"><div class="label">Total RX (${days}d)</div><div class="num">${formatBytes(totalRx)}</div></div>
+    <div class="stat-card"><div class="label">Total TX (${days}d)</div><div class="num">${formatBytes(totalTx)}</div></div>
+    <div class="stat-card"><div class="label">Combined</div><div class="num">${formatBytes(totalRx + totalTx)}</div></div>
+    ${latestRow ? `<div class="stat-card"><div class="label">Disk Used</div><div class="num">${formatBytes(latestRow.disk_used || 0)}</div></div>
+    <div class="stat-card"><div class="label">Files</div><div class="num green">${latestRow.file_count || 0}</div></div>` : ''}
+  </div>
+
+  <h2>Today (hourly)</h2>
+  <div class="chart-row">
+    <div class="chart-card">
+      <div class="chart-label">&darr; RX per hour</div>
+      ${buildBwChart(hourly, d => d.hour + ':00', d => d.rx)}
+    </div>
+    <div class="chart-card">
+      <div class="chart-label">&uarr; TX per hour</div>
+      ${buildBwChart(hourly, d => d.hour + ':00', d => d.tx)}
+    </div>
+  </div>
+
+  <h2>Daily (${days}d)</h2>
+  <div class="chart-row">
+    <div class="chart-card">
+      <div class="chart-label">&darr; RX per day</div>
+      ${buildBwChart(daily, d => d.date, d => d.rx)}
+    </div>
+    <div class="chart-card">
+      <div class="chart-label">&uarr; TX per day</div>
+      ${buildBwChart(daily, d => d.date, d => d.tx)}
+    </div>
+  </div>
+
+  <h2>Daily Breakdown</h2>
+  ${daily.length === 0 ? '<div style="text-align:center;color:var(--text-muted);font-family:var(--mono);font-size:0.85rem;padding:2rem;">No data yet</div>' : `
+  <table>
+    <thead><tr><th>Date</th><th class="right">RX</th><th class="right">TX</th><th class="right">Total</th></tr></thead>
+    <tbody>
+      ${[...daily].reverse().map(d => `<tr>
+        <td data-label="Date">${esc(d.date)}</td>
+        <td class="td-right" data-label="RX">${formatBytes(d.rx)}</td>
+        <td class="td-right" data-label="TX">${formatBytes(d.tx)}</td>
+        <td class="td-right" data-label="Total">${formatBytes(d.rx + d.tx)}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`}
+</div>
+<script>
+(function(){
+  if (location.search.indexOf('tzo=') === -1) {
+    var sep = location.search ? '&' : '?';
+    location.replace(location.href + sep + 'tzo=' + new Date().getTimezoneOffset());
+  }
+})();
+</script>
+</body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
+
+// ── Speed Test ──
 
 async function handleSpeedTestPage(env) {
   const configRaw = await env.NODES.get('config');
@@ -691,118 +915,314 @@ async function handleSpeedTestPage(env) {
   .subtitle a { color:var(--accent); text-decoration:none; }
   .subtitle a:hover { text-decoration:underline; }
   h2 { font-weight:600; font-size:1.1rem; margin:1.5rem 0 0.75rem; }
+  .controls { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem; }
   .btn { padding:0.5rem 1.2rem; border:none; border-radius:8px; font-family:var(--mono); font-size:0.85rem; cursor:pointer; background:var(--accent); color:#fff; }
   .btn:hover { opacity:0.85; }
   .btn:disabled { opacity:0.4; cursor:default; }
-  .node-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:1rem; margin-bottom:0.75rem; }
-  .node-header { font-family:var(--mono); font-size:0.9rem; font-weight:600; margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem; }
+  .btn-sm { padding:0.3rem 0.7rem; font-size:0.78rem; }
+  .btn-sm.active { background:var(--text); }
+  .node-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:1.25rem; margin-bottom:0.75rem; }
+  .node-header { font-family:var(--mono); font-size:0.9rem; font-weight:600; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; }
   .node-region { font-size:0.72rem; color:var(--text-muted); font-weight:400; }
-  .test-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.5rem; }
-  .test-item { background:var(--bg); border-radius:8px; padding:0.6rem 0.75rem; }
-  .test-label { font-family:var(--mono); font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.2rem; }
-  .test-val { font-family:var(--mono); font-size:1.1rem; font-weight:500; color:var(--accent); }
-  .test-val.bad { color:var(--red); }
-  .test-val.good { color:var(--green); }
-  .test-sub { font-family:var(--mono); font-size:0.68rem; color:var(--text-muted); }
-  .client-test { margin-top:0.5rem; }
-  .progress-bar { width:100%; height:6px; background:var(--border); border-radius:3px; overflow:hidden; margin:0.5rem 0; }
-  .progress-fill { height:100%; background:var(--accent); border-radius:3px; width:0%; transition:width 0.3s; }
-  #status { font-family:var(--mono); font-size:0.82rem; color:var(--text-muted); margin:0.75rem 0; }
+  .gauge-row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }
+  .gauge { text-align:center; }
+  .gauge-label { font-family:var(--mono); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.5rem; }
+  .gauge-val { font-family:var(--mono); font-size:2.2rem; font-weight:500; color:var(--accent); line-height:1; }
+  .gauge-val.measuring { animation:pulse 1s infinite; }
+  .gauge-unit { font-family:var(--mono); font-size:0.82rem; color:var(--text-muted); }
+  .gauge-sub { font-family:var(--mono); font-size:0.68rem; color:var(--text-muted); margin-top:0.3rem; }
+  .stats-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:0.5rem; }
+  .stat { background:var(--bg); border-radius:8px; padding:0.5rem 0.65rem; }
+  .stat-label { font-family:var(--mono); font-size:0.62rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); }
+  .stat-val { font-family:var(--mono); font-size:0.95rem; font-weight:500; color:var(--text); }
+  .stat-val.good { color:var(--green); }
+  .stat-val.bad { color:var(--red); }
+  .live-chart { margin:0.75rem 0; height:60px; display:flex; align-items:end; gap:2px; }
+  .live-bar { flex:1; background:var(--accent); opacity:0.3; border-radius:2px 2px 0 0; min-height:1px; transition:height 0.3s; }
+  .live-bar.active { opacity:0.6; }
+  .phase { font-family:var(--mono); font-size:0.78rem; color:var(--text-muted); margin:0.75rem 0 0.25rem; }
+  .progress-bar { width:100%; height:4px; background:var(--border); border-radius:2px; overflow:hidden; margin:0.35rem 0; }
+  .progress-fill { height:100%; background:var(--accent); border-radius:2px; width:0%; transition:width 0.2s; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+  @media(max-width:500px) { .gauge-row { grid-template-columns:1fr; } .gauge-val { font-size:1.8rem; } }
 </style>
 </head><body>
 <div class="wrap">
   <h1>Speed Test</h1>
-  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/feedback">feedback</a></p>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a> &middot; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/bandwidth">bandwidth</a></p>
 
-  <button class="btn" id="runBtn" onclick="runAll()">Run Speed Test</button>
-  <div class="progress-bar" id="progressBar" style="display:none"><div class="progress-fill" id="progressFill"></div></div>
-  <div id="status"></div>
+  <div class="controls">
+    <button class="btn" id="runBtn" onclick="runTest()">Run Speed Test</button>
+    <span style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted)">Threads:</span>
+    <button class="btn btn-sm" onclick="setThreads(1)" id="t1">1</button>
+    <button class="btn btn-sm active" onclick="setThreads(4)" id="t4">4</button>
+    <button class="btn btn-sm" onclick="setThreads(8)" id="t8">8</button>
+  </div>
 
-  <h2>CF Worker &rarr; Node (server-side)</h2>
-  <div id="cfResults"><div style="color:var(--text-muted);font-family:var(--mono);font-size:0.85rem;padding:1rem;">Click "Run Speed Test" to begin</div></div>
-
-  <h2>Your Browser &rarr; Node (client-side)</h2>
-  <div id="clientResults"></div>
+  <div id="results"></div>
 </div>
 
 <script>
 var NODES = ${JSON.stringify(nodes.map(n => ({ id: n.id, url: n.url, continent: n.continent })))};
+var THREADS = 4;
+var running = false;
 
-function fmt(ms) { return ms < 0 ? 'FAIL' : ms + 'ms'; }
-function fmtSpeed(bytes, ms) {
-  if (ms <= 0) return '-';
-  var bps = (bytes * 8 * 1000) / ms;
-  if (bps > 1e9) return (bps/1e9).toFixed(1) + ' Gbps';
-  if (bps > 1e6) return (bps/1e6).toFixed(1) + ' Mbps';
-  if (bps > 1e3) return (bps/1e3).toFixed(1) + ' Kbps';
-  return bps.toFixed(0) + ' bps';
+function setThreads(n) {
+  THREADS = n;
+  [1,4,8].forEach(function(v){ document.getElementById('t'+v).className = 'btn btn-sm' + (v===n?' active':''); });
 }
-function cls(ms) { return ms < 0 ? 'bad' : ms < 100 ? 'good' : ms < 500 ? '' : 'bad'; }
 
-async function runAll() {
-  var btn = document.getElementById('runBtn');
-  var bar = document.getElementById('progressBar');
-  var fill = document.getElementById('progressFill');
-  var status = document.getElementById('status');
-  btn.disabled = true;
-  bar.style.display = 'block';
-  fill.style.width = '10%';
-  status.textContent = 'Testing CF Worker to nodes...';
+function fmtSpeed(bps) {
+  if (bps >= 1e9) return { val:(bps/1e9).toFixed(1), unit:'Gbps' };
+  if (bps >= 1e6) return { val:(bps/1e6).toFixed(1), unit:'Mbps' };
+  if (bps >= 1e3) return { val:(bps/1e3).toFixed(1), unit:'Kbps' };
+  return { val:bps.toFixed(0), unit:'bps' };
+}
 
-  // Server-side test
-  try {
-    var r = await fetch('/admin/api/speedtest');
-    var data = await r.json();
-    fill.style.width = '50%';
-    var html = '';
-    data.results.forEach(function(n) {
-      html += '<div class="node-card"><div class="node-header">' + n.id + ' <span class="node-region">' + (n.continent||'') + ' &middot; ' + n.url + '</span></div>';
-      html += '<div class="test-grid">';
-      html += '<div class="test-item"><div class="test-label">Latency</div><div class="test-val ' + cls(n.latency) + '">' + fmt(n.latency) + '</div></div>';
-      html += '<div class="test-item"><div class="test-label">Download (stats)</div><div class="test-val ' + cls(n.downloadMs) + '">' + fmt(n.downloadMs) + '</div><div class="test-sub">' + (n.downloadBytes||0) + ' bytes</div></div>';
-      html += '<div class="test-item"><div class="test-label">Upload (100KB)</div><div class="test-val ' + cls(n.uploadMs) + '">' + fmt(n.uploadMs) + '</div><div class="test-sub">' + fmtSpeed(n.uploadBytes||0, n.uploadMs) + '</div></div>';
-      html += '</div></div>';
-    });
-    document.getElementById('cfResults').innerHTML = html;
-  } catch(e) {
-    document.getElementById('cfResults').innerHTML = '<div class="node-card" style="color:var(--red)">Error: ' + e.message + '</div>';
-  }
+function fmtBytes(b) {
+  if (b >= 1073741824) return (b/1073741824).toFixed(1) + ' GB';
+  if (b >= 1048576) return (b/1048576).toFixed(1) + ' MB';
+  if (b >= 1024) return (b/1024).toFixed(1) + ' KB';
+  return b + ' B';
+}
 
-  // Client-side test
-  status.textContent = 'Testing your browser to nodes...';
-  var clientHtml = '';
-  for (var i = 0; i < NODES.length; i++) {
-    var node = NODES[i];
-    fill.style.width = (50 + (i+1) / NODES.length * 45) + '%';
-    var latency = -1, dlMs = -1, dlBytes = 0;
-    // Latency
+function clsLatency(ms) { return ms < 50 ? 'good' : ms < 200 ? '' : 'bad'; }
+
+// Measure latency with multiple pings
+async function measureLatency(url, count) {
+  var times = [];
+  for (var i = 0; i < count; i++) {
     try {
       var t0 = performance.now();
-      var resp = await fetch(node.url + '/health', { mode: 'cors', cache: 'no-store' });
-      await resp.text();
-      latency = Math.round(performance.now() - t0);
-    } catch(e) {}
-    // Download speed (fetch stats.json)
-    try {
-      var t1 = performance.now();
-      var resp2 = await fetch(node.url + '/stats', { mode: 'cors', cache: 'no-store' });
-      var body = await resp2.text();
-      dlMs = Math.round(performance.now() - t1);
-      dlBytes = body.length;
-    } catch(e) {}
-
-    clientHtml += '<div class="node-card"><div class="node-header">' + node.id + ' <span class="node-region">' + (node.continent||'') + ' &middot; ' + node.url + '</span></div>';
-    clientHtml += '<div class="test-grid">';
-    clientHtml += '<div class="test-item"><div class="test-label">Latency</div><div class="test-val ' + cls(latency) + '">' + fmt(latency) + '</div></div>';
-    clientHtml += '<div class="test-item"><div class="test-label">Download</div><div class="test-val ' + cls(dlMs) + '">' + fmt(dlMs) + '</div><div class="test-sub">' + dlBytes + ' bytes</div></div>';
-    clientHtml += '</div></div>';
+      await fetch(url + '/health', { mode:'cors', cache:'no-store' });
+      times.push(performance.now() - t0);
+    } catch(e) { times.push(-1); }
   }
-  document.getElementById('clientResults').innerHTML = clientHtml;
+  var valid = times.filter(function(t){ return t >= 0; });
+  if (!valid.length) return { min:-1, avg:-1, max:-1, jitter:0 };
+  valid.sort(function(a,b){ return a-b; });
+  var avg = valid.reduce(function(s,v){ return s+v; }, 0) / valid.length;
+  var jitter = valid.length > 1 ? Math.sqrt(valid.reduce(function(s,v){ return s + (v-avg)*(v-avg); }, 0) / valid.length) : 0;
+  return { min:Math.round(valid[0]), avg:Math.round(avg), max:Math.round(valid[valid.length-1]), jitter:Math.round(jitter) };
+}
 
-  fill.style.width = '100%';
-  status.textContent = 'Complete!';
+// Multi-threaded download test with progress tracking
+async function measureDownload(url, threads, updateFn) {
+  // Use 10MB file per thread, so 4 threads = 40MB total
+  var fileUrl = url + '/speedtest-10mb.bin';
+  var fileSize = 10485760;
+  var totalBytes = 0;
+  var samples = [];
+  var startTime = performance.now();
+  var lastSample = startTime;
+
+  function sampleTick() {
+    var now = performance.now();
+    var elapsed = now - startTime;
+    if (elapsed > 0) {
+      var bps = (totalBytes * 8 * 1000) / elapsed;
+      samples.push({ t: elapsed, bps: bps });
+      updateFn({ current: bps, bytes: totalBytes, elapsed: elapsed, samples: samples });
+    }
+    lastSample = now;
+  }
+
+  var interval = setInterval(sampleTick, 250);
+
+  // Launch parallel downloads
+  var promises = [];
+  for (var i = 0; i < threads; i++) {
+    promises.push((async function() {
+      try {
+        var resp = await fetch(fileUrl + '?t=' + Date.now() + '_' + Math.random(), { mode:'cors', cache:'no-store' });
+        var reader = resp.body.getReader();
+        while (true) {
+          var result = await reader.read();
+          if (result.done) break;
+          totalBytes += result.value.length;
+        }
+      } catch(e) {}
+    })());
+  }
+
+  await Promise.all(promises);
+  clearInterval(interval);
+  sampleTick(); // Final sample
+
+  var elapsed = performance.now() - startTime;
+  var avgBps = elapsed > 0 ? (totalBytes * 8 * 1000) / elapsed : 0;
+  var peakBps = samples.length ? Math.max.apply(null, samples.map(function(s){ return s.bps; })) : 0;
+
+  return { avgBps: avgBps, peakBps: peakBps, totalBytes: totalBytes, elapsed: Math.round(elapsed), samples: samples };
+}
+
+// Multi-threaded upload test
+async function measureUpload(url, threads, updateFn) {
+  var chunkSize = 5 * 1024 * 1024; // 5MB per thread
+  var totalBytes = 0;
+  var samples = [];
+  var startTime = performance.now();
+
+  function sampleTick() {
+    var now = performance.now();
+    var elapsed = now - startTime;
+    if (elapsed > 0) {
+      var bps = (totalBytes * 8 * 1000) / elapsed;
+      samples.push({ t: elapsed, bps: bps });
+      updateFn({ current: bps, bytes: totalBytes, elapsed: elapsed, samples: samples });
+    }
+  }
+
+  var interval = setInterval(sampleTick, 250);
+
+  var promises = [];
+  for (var i = 0; i < threads; i++) {
+    promises.push((async function() {
+      try {
+        var data = new Uint8Array(chunkSize);
+        crypto.getRandomValues(new Uint8Array(data.buffer, 0, Math.min(1024, chunkSize)));
+        var xhr = new XMLHttpRequest();
+        var loaded = 0;
+        xhr.upload.onprogress = function(e) { totalBytes += (e.loaded - loaded); loaded = e.loaded; };
+        await new Promise(function(resolve, reject) {
+          xhr.open('POST', url + '/speedtest-upload?t=' + Date.now() + '_' + Math.random());
+          xhr.onload = resolve;
+          xhr.onerror = reject;
+          xhr.ontimeout = reject;
+          xhr.timeout = 30000;
+          xhr.send(data);
+        });
+      } catch(e) {}
+    })());
+  }
+
+  await Promise.all(promises);
+  clearInterval(interval);
+  sampleTick();
+
+  var elapsed = performance.now() - startTime;
+  var avgBps = elapsed > 0 ? (totalBytes * 8 * 1000) / elapsed : 0;
+  var peakBps = samples.length ? Math.max.apply(null, samples.map(function(s){ return s.bps; })) : 0;
+
+  return { avgBps: avgBps, peakBps: peakBps, totalBytes: totalBytes, elapsed: Math.round(elapsed), samples: samples };
+}
+
+async function runTest() {
+  if (running) return;
+  running = true;
+  var btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+
+  var html = '';
+  for (var i = 0; i < NODES.length; i++) {
+    var node = NODES[i];
+    var cardId = 'node-' + i;
+    html += '<div class="node-card" id="' + cardId + '">';
+    html += '<div class="node-header">' + node.id + ' <span class="node-region">' + (node.continent||'') + ' &middot; ' + node.url + '</span></div>';
+    html += '<div class="gauge-row">';
+    html += '<div class="gauge"><div class="gauge-label">Download</div><div class="gauge-val measuring" id="' + cardId + '-dl-val">--</div><div class="gauge-unit" id="' + cardId + '-dl-unit">&nbsp;</div><div class="gauge-sub" id="' + cardId + '-dl-sub">&nbsp;</div></div>';
+    html += '<div class="gauge"><div class="gauge-label">Upload</div><div class="gauge-val measuring" id="' + cardId + '-ul-val">--</div><div class="gauge-unit" id="' + cardId + '-ul-unit">&nbsp;</div><div class="gauge-sub" id="' + cardId + '-ul-sub">&nbsp;</div></div>';
+    html += '</div>';
+    html += '<div class="live-chart" id="' + cardId + '-chart">' + Array(40).fill('<div class="live-bar" style="height:1px"></div>').join('') + '</div>';
+    html += '<div class="phase" id="' + cardId + '-phase">Waiting...</div>';
+    html += '<div class="progress-bar"><div class="progress-fill" id="' + cardId + '-prog"></div></div>';
+    html += '<div class="stats-row" id="' + cardId + '-stats"></div>';
+    html += '</div>';
+  }
+  document.getElementById('results').innerHTML = html;
+
+  for (var i = 0; i < NODES.length; i++) {
+    var node = NODES[i];
+    var cid = 'node-' + i;
+    var phase = document.getElementById(cid + '-phase');
+    var prog = document.getElementById(cid + '-prog');
+    var chartEl = document.getElementById(cid + '-chart');
+
+    // Phase 1: Latency
+    phase.textContent = 'Measuring latency (10 pings)...';
+    prog.style.width = '5%';
+    var lat = await measureLatency(node.url, 10);
+    prog.style.width = '15%';
+
+    // Phase 2: Download
+    phase.textContent = 'Download test (' + THREADS + ' threads × 10 MB)...';
+    var dlValEl = document.getElementById(cid + '-dl-val');
+    var dlUnitEl = document.getElementById(cid + '-dl-unit');
+    var dlSubEl = document.getElementById(cid + '-dl-sub');
+    var chartBars = chartEl.children;
+    var chartIdx = 0;
+
+    var dl = await measureDownload(node.url, THREADS, function(d) {
+      var s = fmtSpeed(d.current);
+      dlValEl.textContent = s.val;
+      dlUnitEl.textContent = s.unit;
+      dlSubEl.textContent = fmtBytes(d.bytes) + ' transferred';
+      prog.style.width = (15 + (d.bytes / (THREADS * 10485760)) * 40) + '%';
+      // Update live chart bars
+      if (d.samples.length > chartIdx && chartIdx < chartBars.length) {
+        var maxBps = Math.max.apply(null, d.samples.map(function(x){return x.bps;})) || 1;
+        var pct = Math.max((d.samples[d.samples.length-1].bps / maxBps) * 100, 2);
+        chartBars[chartIdx].style.height = pct + '%';
+        chartBars[chartIdx].className = 'live-bar active';
+        chartIdx++;
+      }
+    });
+    dlValEl.classList.remove('measuring');
+    var dlFmt = fmtSpeed(dl.avgBps);
+    dlValEl.textContent = dlFmt.val;
+    dlUnitEl.textContent = dlFmt.unit;
+    dlSubEl.textContent = fmtBytes(dl.totalBytes) + ' in ' + (dl.elapsed/1000).toFixed(1) + 's';
+
+    // Reset chart for upload
+    for (var b = 0; b < chartBars.length; b++) { chartBars[b].style.height = '1px'; chartBars[b].className = 'live-bar'; }
+    chartIdx = 0;
+    prog.style.width = '55%';
+
+    // Phase 3: Upload
+    phase.textContent = 'Upload test (' + THREADS + ' threads × 5 MB)...';
+    var ulValEl = document.getElementById(cid + '-ul-val');
+    var ulUnitEl = document.getElementById(cid + '-ul-unit');
+    var ulSubEl = document.getElementById(cid + '-ul-sub');
+
+    var ul = await measureUpload(node.url, THREADS, function(d) {
+      var s = fmtSpeed(d.current);
+      ulValEl.textContent = s.val;
+      ulUnitEl.textContent = s.unit;
+      ulSubEl.textContent = fmtBytes(d.bytes) + ' transferred';
+      prog.style.width = (55 + (d.bytes / (THREADS * 5242880)) * 40) + '%';
+      if (d.samples.length > chartIdx && chartIdx < chartBars.length) {
+        var maxBps = Math.max.apply(null, d.samples.map(function(x){return x.bps;})) || 1;
+        var pct = Math.max((d.samples[d.samples.length-1].bps / maxBps) * 100, 2);
+        chartBars[chartIdx].style.height = pct + '%';
+        chartBars[chartIdx].className = 'live-bar active';
+        chartIdx++;
+      }
+    });
+    ulValEl.classList.remove('measuring');
+    var ulFmt = fmtSpeed(ul.avgBps);
+    ulValEl.textContent = ulFmt.val;
+    ulUnitEl.textContent = ulFmt.unit;
+    ulSubEl.textContent = fmtBytes(ul.totalBytes) + ' in ' + (ul.elapsed/1000).toFixed(1) + 's';
+
+    prog.style.width = '100%';
+    phase.textContent = 'Complete';
+
+    // Summary stats
+    var dlPeak = fmtSpeed(dl.peakBps);
+    var ulPeak = fmtSpeed(ul.peakBps);
+    document.getElementById(cid + '-stats').innerHTML =
+      '<div class="stat"><div class="stat-label">Latency (min/avg/max)</div><div class="stat-val ' + clsLatency(lat.avg) + '">' + lat.min + ' / ' + lat.avg + ' / ' + lat.max + ' ms</div></div>' +
+      '<div class="stat"><div class="stat-label">Jitter</div><div class="stat-val">' + lat.jitter + ' ms</div></div>' +
+      '<div class="stat"><div class="stat-label">DL Peak</div><div class="stat-val good">' + dlPeak.val + ' ' + dlPeak.unit + '</div></div>' +
+      '<div class="stat"><div class="stat-label">UL Peak</div><div class="stat-val good">' + ulPeak.val + ' ' + ulPeak.unit + '</div></div>' +
+      '<div class="stat"><div class="stat-label">DL Total</div><div class="stat-val">' + fmtBytes(dl.totalBytes) + '</div></div>' +
+      '<div class="stat"><div class="stat-label">UL Total</div><div class="stat-val">' + fmtBytes(ul.totalBytes) + '</div></div>';
+  }
+
   btn.disabled = false;
-  setTimeout(function(){ bar.style.display = 'none'; fill.style.width = '0%'; }, 2000);
+  btn.textContent = 'Run Speed Test';
+  running = false;
 }
 </script>
 </body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
@@ -1335,11 +1755,6 @@ export default {
       return stub.fetch(new Request(doUrl, request));
     }
 
-    // Admin speed test API (CF-to-node latency + throughput)
-    if (path === '/admin/api/speedtest') {
-      return handleSpeedTest(env);
-    }
-
     // Admin speed test page
     if (path === '/admin/speedtest') {
       return handleSpeedTestPage(env);
@@ -1353,6 +1768,11 @@ export default {
     // Admin feedback
     if (path === '/admin/feedback') {
       return handleAdminFeedback(env, url);
+    }
+
+    // Admin bandwidth history
+    if (path === '/admin/bandwidth') {
+      return handleAdminBandwidth(env, url);
     }
 
     // Admin files list
@@ -1389,10 +1809,10 @@ export default {
       return env.ASSETS.fetch(new Request(assetUrl, request));
     }
 
-    // Download redirect — any path that looks like a file ID (6-10 alphanumeric chars)
+    // Download page — any path that looks like a file ID (6-10 alphanumeric chars)
     const idMatch = path.match(/^\/([A-Za-z0-9]{6,10})$/);
     if (idMatch) {
-      return handleDownload(idMatch[1], env);
+      return handleDownload(idMatch[1], env, request);
     }
 
     // 404
