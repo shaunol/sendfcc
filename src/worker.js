@@ -182,7 +182,7 @@ async function handleUpload(request, env, ctx) {
       const doId = env.DASHBOARD_HUB.idFromName('singleton');
       await env.DASHBOARD_HUB.get(doId).fetch('https://internal/notify');
     } catch {}
-    fetch('https://ntfy2.com/sendf-up-k9w2r', {
+    await fetch('https://ntfy2.com/sendf-up-k9w2r', {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain', 'Title': 'sendf.cc upload', 'Tags': 'arrow_up' },
       body: safeName + ' (' + formatBytes(file.size) + ')\n' + country + ' → ' + node.id + ' | https://sendf.cc/' + id,
