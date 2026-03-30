@@ -53,11 +53,13 @@ function esc(s) {
 // ── Request Analytics ──
 
 function recordHit(env, path, search, country) {
-  const date = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const date = now.toISOString().split('T')[0];
+  const hour = String(now.getUTCHours()).padStart(2, '0');
   const full = (search && path.startsWith('/api/')) ? (path + search).slice(0, 200) : path.slice(0, 200);
   return env.DB.prepare(
-    'INSERT INTO request_stats (date, path, country, hits) VALUES (?, ?, ?, 1) ON CONFLICT(date, path, country) DO UPDATE SET hits = hits + 1'
-  ).bind(date, full, country || '').run();
+    'INSERT INTO request_stats (date, hour, path, country, hits) VALUES (?, ?, ?, ?, 1) ON CONFLICT(date, hour, path, country) DO UPDATE SET hits = hits + 1'
+  ).bind(date, hour, full, country || '').run();
 }
 
 // ── Node Selection ──
@@ -259,7 +261,9 @@ async function renderDashboardBody(env, url) {
   const days = parseInt(url.searchParams.get('days') || '7', 10);
   const filterPath = url.searchParams.get('path') || '';
   const filterCountry = url.searchParams.get('country') || '';
-  const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+  const tzo = parseInt(url.searchParams.get('tzo') || '0', 10);
+  const offsetH = -Math.round(tzo / 60);
+  const since = new Date(Date.now() - (days + 1) * 86400000).toISOString().split('T')[0];
 
   let where = 'date >= ?';
   const baseParams = [since];
@@ -267,11 +271,11 @@ async function renderDashboardBody(env, url) {
   if (filterCountry) { where += ' AND country = ?'; baseParams.push(filterCountry); }
   const whereNoEmpty = where + (filterCountry ? '' : " AND country != ''");
 
-  const [totalHits, topPaths, topCountries, dailyHits, feedbackCount, fileStats] = await Promise.all([
+  const [totalHits, topPaths, topCountries, allHourly, feedbackCount, fileStats] = await Promise.all([
     env.DB.prepare('SELECT SUM(hits) as total FROM request_stats WHERE ' + where).bind(...baseParams).first(),
     env.DB.prepare('SELECT path, SUM(hits) as total FROM request_stats WHERE ' + where + ' GROUP BY path ORDER BY total DESC LIMIT 30').bind(...baseParams).all(),
     env.DB.prepare('SELECT country, SUM(hits) as total FROM request_stats WHERE ' + whereNoEmpty + ' GROUP BY country ORDER BY total DESC LIMIT 20').bind(...baseParams).all(),
-    env.DB.prepare('SELECT date, SUM(hits) as total FROM request_stats WHERE ' + where + ' GROUP BY date ORDER BY date DESC LIMIT 30').bind(...baseParams).all(),
+    env.DB.prepare('SELECT date, hour, SUM(hits) as total FROM request_stats WHERE ' + where + ' GROUP BY date, hour').bind(...baseParams).all(),
     env.DB.prepare('SELECT COUNT(*) as total FROM feedback').first(),
     env.DB.prepare('SELECT COUNT(*) as cnt, COALESCE(SUM(size),0) as total_size FROM files WHERE expires_at > datetime("now")').first(),
   ]);
@@ -279,12 +283,39 @@ async function renderDashboardBody(env, url) {
   const total = totalHits?.total || 0;
   const paths = topPaths?.results || [];
   const countries = topCountries?.results || [];
-  const daily = (dailyHits?.results || []).reverse();
   const fbTotal = feedbackCount?.total || 0;
   const apiHits = paths.filter(p => p.path.startsWith('/api/') || p.path === '/upload').reduce((s, p) => s + p.total, 0);
   const pageHits = total - apiHits;
   const activeFiles = fileStats?.cnt || 0;
   const totalSize = fileStats?.total_size || 0;
+
+  // Shift UTC (date,hour) to local timezone then aggregate
+  const localDailyMap = new Map();
+  const localHourlyMap = new Map();
+  const localNow = new Date(Date.now() + offsetH * 3600000);
+  const localToday = localNow.toISOString().split('T')[0];
+  for (const r of (allHourly?.results || [])) {
+    const utcMs = new Date(r.date + 'T00:00:00Z').getTime() + parseInt(r.hour, 10) * 3600000;
+    const localMs = utcMs + offsetH * 3600000;
+    const ld = new Date(localMs);
+    const localDate = ld.toISOString().split('T')[0];
+    const localH = String(ld.getUTCHours()).padStart(2, '0');
+    localDailyMap.set(localDate, (localDailyMap.get(localDate) || 0) + r.total);
+    if (localDate === localToday) {
+      localHourlyMap.set(localH, (localHourlyMap.get(localH) || 0) + r.total);
+    }
+  }
+
+  const daily = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const ds = new Date(localNow.getTime() - i * 86400000).toISOString().split('T')[0];
+    daily.push({ date: ds, total: localDailyMap.get(ds) || 0 });
+  }
+  const hourly = [];
+  for (let h = 0; h < 24; h++) {
+    const hh = String(h).padStart(2, '0');
+    hourly.push({ hour: hh, total: localHourlyMap.get(hh) || 0 });
+  }
 
   function adminQs(overrides) {
     const p = new URLSearchParams();
@@ -298,13 +329,42 @@ async function renderDashboardBody(env, url) {
     return s ? '?' + s : '';
   }
 
-  const maxDaily = Math.max(...daily.map(d => d.total), 1);
-  const sparkW = 100, sparkH = 32;
-  const sparkPoints = daily.map((d, i) => {
-    const x = daily.length > 1 ? (i / (daily.length - 1)) * sparkW : sparkW / 2;
-    const y = sparkH - (d.total / maxDaily) * (sparkH - 4) - 2;
-    return x + ',' + y;
-  }).join(' ');
+  function buildChart(data, labelFn) {
+    const W = 300, H = 120;
+    const pad = { top: 14, right: 8, bottom: 22, left: 36 };
+    const cw = W - pad.left - pad.right;
+    const ch = H - pad.top - pad.bottom;
+    const max = Math.max(...data.map(d => d.total), 1);
+    const n = data.length;
+    const gap = n > 15 ? 1 : 2;
+    const barW = Math.max((cw - gap * (n - 1)) / n, 1);
+    let svg = '';
+    for (let i = 0; i <= 3; i++) {
+      const val = Math.round(max * i / 3);
+      const y = (pad.top + ch - (i / 3) * ch).toFixed(1);
+      svg += '<line x1="' + pad.left + '" y1="' + y + '" x2="' + (W - pad.right) + '" y2="' + y + '" stroke="#d1e7e5" stroke-width="0.5"/>';
+      svg += '<text x="' + (pad.left - 4) + '" y="' + (+y + 3).toFixed(1) + '" text-anchor="end" fill="#5f8a87" font-size="7" font-family="DM Mono,monospace">' + val + '</text>';
+    }
+    data.forEach((d, i) => {
+      const barH = max > 0 ? (d.total / max) * ch : 0;
+      const x = pad.left + i * (barW + gap);
+      const y = pad.top + ch - barH;
+      svg += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + barH.toFixed(1) + '" rx="1" fill="#0d9488" opacity="' + (d.total > 0 ? '0.4' : '0.08') + '"><title>' + labelFn(d) + ': ' + d.total + '</title></rect>';
+    });
+    const labelCount = n <= 10 ? n : n <= 24 ? 6 : 7;
+    const step = Math.max(Math.floor(n / labelCount), 1);
+    for (let i = 0; i < n; i += step) {
+      const x = pad.left + i * (barW + gap) + barW / 2;
+      const rawLabel = labelFn(data[i]);
+      const shortLabel = rawLabel.length > 5 ? rawLabel.slice(8) + '/' + rawLabel.slice(5, 7) : rawLabel;
+      svg += '<text x="' + x.toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" fill="#5f8a87" font-size="6.5" font-family="DM Mono,monospace">' + shortLabel + '</text>';
+    }
+    svg += '<line x1="' + pad.left + '" y1="' + pad.top + '" x2="' + pad.left + '" y2="' + (pad.top + ch) + '" stroke="#d1e7e5" stroke-width="0.5"/>';
+    return '<svg width="100%" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">' + svg + '</svg>';
+  }
+
+  const hourlyChart = buildChart(hourly, d => d.hour + ':00');
+  const dailyChart = daily.length > 0 ? buildChart(daily, d => d.date) : '';
 
   const filterBanner = (filterPath || filterCountry) ? `
   <div style="background:var(--accent-light);border:1px solid var(--accent);border-radius:8px;padding:0.5rem 0.75rem;margin-bottom:1rem;font-family:var(--mono);font-size:0.8rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
@@ -316,7 +376,7 @@ async function renderDashboardBody(env, url) {
 
   return `
   <h1>Dashboard</h1>
-  <p class="subtitle"><span class="live-dot"></span>sendf.cc &mdash; <a href="/admin/feedback">feedback</a></p>
+  <p class="subtitle"><span class="live-dot"></span>sendf.cc &mdash; <a href="/admin/feedback">feedback</a> &middot; <a href="/admin/files">files</a></p>
 
   <div class="ext-links">
     <a href="https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain%3Asendf.cc" target="_blank" rel="noopener">Google</a>
@@ -340,11 +400,16 @@ async function renderDashboardBody(env, url) {
     <div class="stat-card"><div class="label">Countries</div><div class="num green">${countries.length}</div></div>
   </div>
 
-  ${daily.length > 1 ? `
-  <svg class="sparkline" width="100%" height="40" viewBox="0 0 ${sparkW} ${sparkH}" preserveAspectRatio="none">
-    <polyline fill="none" stroke="#0d9488" stroke-width="1.5" points="${sparkPoints}" />
-    <polyline fill="rgba(13,148,136,0.1)" stroke="none" points="0,${sparkH} ${sparkPoints} ${sparkW},${sparkH}" />
-  </svg>` : ''}
+  <div class="chart-row">
+    <div class="chart-card">
+      <div class="chart-label">Today (hourly)</div>
+      ${hourlyChart}
+    </div>
+    <div class="chart-card">
+      <div class="chart-label">Daily (${days}d)</div>
+      ${dailyChart || '<div class="empty" style="padding:0.5rem">No data yet</div>'}
+    </div>
+  </div>
 
   <h2>Popular Routes</h2>
   ${paths.length === 0 ? '<div class="empty">No data yet</div>' : `
@@ -506,6 +571,21 @@ async function handleAdminDashboard(env, url) {
   .badge-country { background:var(--green-light); color:var(--green); }
   a.badge:hover { opacity:0.7; }
   .sparkline { display:block; margin-top:0.25rem; }
+  .chart-row { display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-bottom:0.5rem; }
+  .chart-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:0.75rem; }
+  .chart-label { font-family:var(--mono); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin-bottom:0.4rem; }
+  .msg-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:1rem; margin-bottom:0.75rem; }
+  .msg-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; }
+  .msg-title { font-weight:600; font-size:0.95rem; }
+  .msg-id { font-family:var(--mono); font-size:0.72rem; color:var(--text-muted); }
+  .msg-body { font-family:var(--mono); font-size:0.82rem; white-space:pre-wrap; word-break:break-all; margin-bottom:0.5rem; padding:0.5rem; background:var(--bg); border-radius:6px; }
+  .msg-meta { display:flex; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:0.75rem; color:var(--text-muted); }
+  .msg-fingerprint { margin-top:0.5rem; padding-top:0.5rem; border-top:1px dashed var(--border); font-family:var(--mono); font-size:0.72rem; color:var(--text-muted); opacity:0.7; line-height:1.6; }
+  .delete-msg { background:none; border:none; font-family:var(--mono); font-size:0.72rem; color:var(--text-muted); cursor:pointer; padding:0.2rem 0.4rem; border-radius:4px; }
+  .delete-msg:hover { color:var(--red); background:var(--red-light, #fef2f2); }
+  .btn { padding:0.4rem 1rem; border:none; border-radius:8px; font-family:var(--mono); font-size:0.82rem; cursor:pointer; text-decoration:none; display:inline-block; }
+  .btn-danger { background:var(--red, #dc2626); color:#fff; }
+  .btn-danger:hover { opacity:0.85; }
   .empty { text-align:center; padding:2rem; color:var(--text-muted); font-family:var(--mono); font-size:0.85rem; }
   .ext-links { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1.25rem; }
   .ext-links a { font-family:var(--mono); font-size:0.7rem; padding:0.25rem 0.6rem; border:1px solid var(--border); border-radius:6px; text-decoration:none; color:var(--text-muted); background:var(--surface); }
@@ -514,6 +594,7 @@ async function handleAdminDashboard(env, url) {
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
   @media(max-width:700px) {
     .stats-grid { grid-template-columns:repeat(2, 1fr); }
+    .chart-row { grid-template-columns:1fr; }
     table, thead, tbody, tr, td, th { display:block; }
     thead { display:none; }
     tbody tr { padding:0.6rem; margin-bottom:0.5rem; background:var(--surface); border:1px solid var(--border); border-radius:10px; }
@@ -530,7 +611,9 @@ async function handleAdminDashboard(env, url) {
   var ws, retry = 0;
   function connect() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/admin/ws' + location.search);
+    var qs = location.search || '?';
+    if (qs.indexOf('tzo=') === -1) qs += (qs.length > 1 ? '&' : '') + 'tzo=' + new Date().getTimezoneOffset();
+    ws = new WebSocket(proto + '//' + location.host + '/admin/ws' + qs);
     ws.onopen = function() { retry = 0; };
     ws.onmessage = function(e) {
       try { var d = JSON.parse(e.data); if (d.html) document.querySelector('.wrap').innerHTML = d.html; } catch(err) {}
@@ -654,6 +737,199 @@ async function handleAdminFeedback(env, url) {
 </html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
+// ── Admin Files List ──
+
+async function handleAdminFiles(env, url) {
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 200);
+  const offset = Math.max(parseInt(url.searchParams.get('offset') || '0', 10), 0);
+  const countResult = await env.DB.prepare('SELECT COUNT(*) as total FROM files').first();
+  const total = countResult?.total || 0;
+  const rows = await env.DB.prepare('SELECT * FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?').bind(limit, offset).all();
+  const files = rows.results || [];
+  const currentPage = Math.floor(offset / limit) + 1;
+  const totalPages = Math.ceil(total / limit);
+
+  function buildQs(overrides) {
+    const p = new URLSearchParams();
+    p.set('limit', String(overrides.limit !== undefined ? overrides.limit : limit));
+    if (overrides.offset) p.set('offset', String(overrides.offset));
+    return '?' + p.toString();
+  }
+
+  return new Response(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Files &mdash; sendf.cc admin</title><meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=optional">
+<style>
+  :root { --bg:#f0fdfa; --surface:#fff; --text:#134e4a; --text-muted:#5f8a87; --accent:#0d9488; --accent-light:#ccfbf1; --border:#d1e7e5; --green:#16a34a; --green-light:#f0fdf4; --red:#dc2626; --mono:'DM Mono',monospace; --sans:'DM Sans',sans-serif; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; padding:2rem 1rem; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { font-weight:700; font-size:1.6rem; margin-bottom:0.25rem; }
+  .subtitle { color:var(--text-muted); font-size:0.88rem; margin-bottom:1.5rem; }
+  .subtitle a { color:var(--accent); text-decoration:none; }
+  .subtitle a:hover { text-decoration:underline; }
+  .stats { font-family:var(--mono); font-size:0.78rem; color:var(--text-muted); margin-bottom:1rem; }
+  table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  thead th { text-align:left; padding:0.5rem 0.75rem; font-family:var(--mono); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); border-bottom:2px solid var(--border); font-weight:500; white-space:nowrap; }
+  tbody td { padding:0.5rem 0.75rem; border-bottom:1px solid var(--border); vertical-align:top; }
+  tbody tr:hover { background:var(--accent-light); }
+  .td-id { font-family:var(--mono); font-size:0.78rem; }
+  .td-id a { color:var(--accent); text-decoration:none; }
+  .td-id a:hover { text-decoration:underline; }
+  .td-name { font-family:var(--mono); font-size:0.78rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .td-size { font-family:var(--mono); font-size:0.78rem; text-align:right; }
+  .td-date { font-family:var(--mono); font-size:0.75rem; color:var(--text-muted); white-space:nowrap; }
+  .badge { display:inline-block; padding:0.1rem 0.4rem; border-radius:4px; font-family:var(--mono); font-size:0.7rem; }
+  .badge-country { background:var(--green-light); color:var(--green); }
+  .badge-expired { background:#fef2f2; color:var(--red); }
+  .badge-active { background:var(--green-light); color:var(--green); }
+  .empty { text-align:center; padding:3rem 1rem; color:var(--text-muted); font-family:var(--mono); }
+  .pagination { display:flex; gap:0.5rem; margin-top:1.25rem; align-items:center; justify-content:center; }
+  .pagination a, .pagination span { font-family:var(--mono); font-size:0.82rem; padding:0.35rem 0.75rem; border-radius:8px; text-decoration:none; }
+  .pagination a { color:var(--accent); border:1.5px solid var(--border); }
+  .pagination a:hover { border-color:var(--accent); background:var(--accent-light); }
+  .pagination .current { color:var(--text); background:var(--surface); border:1.5px solid var(--border); font-weight:500; }
+  @media(max-width:700px) {
+    table, thead, tbody, tr, td, th { display:block; } thead { display:none; }
+    tbody tr { padding:0.75rem; margin-bottom:0.75rem; background:var(--surface); border:1.5px solid var(--border); border-radius:10px; }
+    tbody td { padding:0.2rem 0; border:none; }
+    tbody td::before { content:attr(data-label); font-family:var(--mono); font-size:0.68rem; text-transform:uppercase; color:var(--text-muted); display:block; margin-bottom:0.15rem; }
+    .td-name { max-width:none; }
+  }
+</style></head>
+<body><div class="wrap">
+  <h1>Files</h1>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a></p>
+  <div class="stats">${total} file${total !== 1 ? 's' : ''} &middot; page ${currentPage} of ${Math.max(totalPages, 1)}</div>
+  ${files.length === 0 ? '<div class="empty">No files yet.</div>' : `
+  <table><thead><tr><th>ID</th><th>Filename</th><th>Size</th><th>Node</th><th>Country</th><th>Status</th><th>Uploaded</th></tr></thead>
+  <tbody>${files.map(f => {
+    const expired = new Date(f.expires_at) < new Date();
+    return `<tr>
+      <td class="td-id" data-label="ID"><a href="/admin/file/${esc(f.id)}">${esc(f.id)}</a></td>
+      <td class="td-name" data-label="File" title="${esc(f.filename)}">${esc(f.filename)}</td>
+      <td class="td-size" data-label="Size">${formatBytes(f.size)}</td>
+      <td data-label="Node"><span class="badge">${esc(f.node)}</span></td>
+      <td data-label="Country"><span class="badge badge-country">${esc(f.country) || '&mdash;'}</span></td>
+      <td data-label="Status"><span class="badge ${expired ? 'badge-expired' : 'badge-active'}">${expired ? 'expired' : 'active'}</span></td>
+      <td class="td-date" data-label="Uploaded">${f.created_at || ''}</td>
+    </tr>`;
+  }).join('')}</tbody></table>`}
+  ${totalPages > 1 ? `<div class="pagination">
+    ${offset > 0 ? `<a href="/admin/files${buildQs({offset: Math.max(offset - limit, 0)})}">&larr; Prev</a>` : ''}
+    <span class="current">${currentPage} / ${totalPages}</span>
+    ${offset + limit < total ? `<a href="/admin/files${buildQs({offset: offset + limit})}">Next &rarr;</a>` : ''}
+  </div>` : ''}
+</div></body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+}
+
+// ── Admin File Detail ──
+
+async function handleAdminFileDetail(fileId, env) {
+  const file = await env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(fileId).first();
+  if (!file) return new Response('File not found', { status: 404 });
+
+  const expired = new Date(file.expires_at) < new Date();
+  const configRaw = await env.NODES.get('config');
+  const nodes = configRaw ? JSON.parse(configRaw) : [];
+  const node = nodes.find(n => n.id === file.node);
+  const fileUrl = node ? node.url + '/files/' + file.id + '/' + file.filename : '';
+
+  return new Response(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>File ${esc(fileId)} &mdash; sendf.cc admin</title><meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=optional">
+<style>
+  :root { --bg:#f0fdfa; --surface:#fff; --text:#134e4a; --text-muted:#5f8a87; --accent:#0d9488; --accent-light:#ccfbf1; --border:#d1e7e5; --green:#16a34a; --green-light:#f0fdf4; --red:#dc2626; --mono:'DM Mono',monospace; --sans:'DM Sans',sans-serif; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; padding:2rem 1rem; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { font-weight:700; font-size:1.6rem; margin-bottom:0.25rem; }
+  .subtitle { color:var(--text-muted); font-size:0.88rem; margin-bottom:1.5rem; }
+  .subtitle a { color:var(--accent); text-decoration:none; }
+  .subtitle a:hover { text-decoration:underline; }
+  .msg-card { background:var(--surface); border:1.5px solid var(--border); border-radius:12px; padding:1.25rem; margin-bottom:1rem; }
+  .msg-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; }
+  .msg-title { font-weight:600; font-size:1rem; word-break:break-all; }
+  .msg-id { font-family:var(--mono); font-size:0.75rem; color:var(--text-muted); }
+  .detail-row { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.5rem; font-family:var(--mono); font-size:0.82rem; }
+  .detail-label { color:var(--text-muted); min-width:80px; }
+  .detail-value { color:var(--text); word-break:break-all; }
+  .badge { display:inline-block; padding:0.1rem 0.4rem; border-radius:4px; font-family:var(--mono); font-size:0.7rem; }
+  .badge-country { background:var(--green-light); color:var(--green); }
+  .badge-expired { background:#fef2f2; color:var(--red); }
+  .badge-active { background:var(--green-light); color:var(--green); }
+  .msg-fingerprint { margin-top:0.75rem; padding-top:0.75rem; border-top:1px dashed var(--border); font-family:var(--mono); font-size:0.75rem; color:var(--text-muted); opacity:0.7; line-height:1.8; }
+  .btn { padding:0.4rem 1rem; border:none; border-radius:8px; font-family:var(--mono); font-size:0.82rem; cursor:pointer; text-decoration:none; display:inline-block; }
+  .btn-danger { background:var(--red); color:#fff; margin-top:1rem; }
+  .btn-danger:hover { opacity:0.85; }
+  .btn-link { background:none; color:var(--accent); border:1.5px solid var(--border); margin-top:1rem; margin-right:0.5rem; }
+  .btn-link:hover { border-color:var(--accent); background:var(--accent-light); }
+</style></head>
+<body><div class="wrap">
+  <h1>File Detail</h1>
+  <p class="subtitle"><a href="/admin">&larr; Dashboard</a> &middot; <a href="/admin/files">files</a></p>
+
+  <div class="msg-card">
+    <div class="msg-header">
+      <div class="msg-title">${esc(file.filename)}</div>
+      <span class="badge ${expired ? 'badge-expired' : 'badge-active'}">${expired ? 'expired' : 'active'}</span>
+    </div>
+    <div class="detail-row"><span class="detail-label">ID</span><span class="detail-value">${esc(file.id)}</span></div>
+    <div class="detail-row"><span class="detail-label">Size</span><span class="detail-value">${formatBytes(file.size)}</span></div>
+    <div class="detail-row"><span class="detail-label">MIME</span><span class="detail-value">${esc(file.mime) || 'unknown'}</span></div>
+    <div class="detail-row"><span class="detail-label">Node</span><span class="detail-value">${esc(file.node)}</span></div>
+    <div class="detail-row"><span class="detail-label">URL</span><span class="detail-value"><a href="https://sendf.cc/${esc(file.id)}" style="color:var(--accent)">sendf.cc/${esc(file.id)}</a></span></div>
+    <div class="detail-row"><span class="detail-label">Uploaded</span><span class="detail-value">${file.created_at || ''}</span></div>
+    <div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${file.expires_at || ''}</span></div>
+
+    <div class="msg-fingerprint">
+      IP: ${esc(file.ip) || 'unknown'}<br>
+      Country: ${esc(file.country) || 'unknown'}<br>
+      ${fileUrl ? 'Direct: <a href="' + esc(fileUrl) + '" style="color:var(--accent)">' + esc(fileUrl) + '</a>' : ''}
+    </div>
+  </div>
+
+  ${!expired && fileUrl ? '<a href="' + esc(fileUrl) + '" class="btn btn-link" target="_blank">Download from node</a>' : ''}
+  <button class="btn btn-danger" onclick="deleteFile()">Delete File</button>
+</div>
+<script>
+function deleteFile() {
+  if (!confirm('Delete this file permanently?')) return;
+  fetch('/admin/api/file/${file.id}', { method: 'DELETE' })
+    .then(function(r) { if (r.ok) location.href = '/admin/files'; else alert('Delete failed'); })
+    .catch(function() { alert('Delete failed'); });
+}
+</script>
+</body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+}
+
+// ── Admin File Delete ──
+
+async function handleAdminDeleteFile(fileId, env) {
+  const file = await env.DB.prepare('SELECT node, filename FROM files WHERE id = ?').bind(fileId).first();
+  if (!file) return json({ error: 'File not found' }, 404);
+
+  // Delete from storage node
+  const configRaw = await env.NODES.get('config');
+  const nodes = configRaw ? JSON.parse(configRaw) : [];
+  const node = nodes.find(n => n.id === file.node);
+  if (node) {
+    await fetch(node.url + '/files/' + fileId + '/' + file.filename, {
+      method: 'DELETE',
+      headers: { 'X-Upload-Key': env.UPLOAD_KEY },
+    }).catch(() => {});
+  }
+
+  // Delete from D1
+  await env.DB.prepare('DELETE FROM files WHERE id = ?').bind(fileId).run();
+
+  return json({ ok: true, deleted: fileId });
+}
+
 // ── Language Detection ──
 
 function detectLanguage(request) {
@@ -754,6 +1030,23 @@ export default {
     // Admin feedback
     if (path === '/admin/feedback') {
       return handleAdminFeedback(env, url);
+    }
+
+    // Admin files list
+    if (path === '/admin/files') {
+      return handleAdminFiles(env, url);
+    }
+
+    // Admin file detail
+    const fileDetailMatch = path.match(/^\/admin\/file\/([A-Za-z0-9]{6,10})$/);
+    if (fileDetailMatch) {
+      return handleAdminFileDetail(fileDetailMatch[1], env);
+    }
+
+    // Admin file delete API
+    const fileDeleteMatch = path.match(/^\/admin\/api\/file\/([A-Za-z0-9]{6,10})$/);
+    if (fileDeleteMatch && request.method === 'DELETE') {
+      return handleAdminDeleteFile(fileDeleteMatch[1], env);
     }
 
     // Homepage (default locale)
