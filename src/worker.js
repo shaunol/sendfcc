@@ -1,7 +1,9 @@
 // sendf.cc — Ephemeral File Sharing Service
 // Cloudflare Worker: routing, upload proxy, download redirects, admin dashboard, health monitoring
 
-const HOMEPAGE = '%%HOMEPAGE%%';
+const PAGES = '%%PAGES%%';
+const LOCALE_CODES = Object.keys(PAGES);
+const DEFAULT_LOCALE = 'en';
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 const MAX_UPLOADS_PER_HOUR = 20;
 const FILE_TTL_HOURS = 24;
@@ -233,7 +235,9 @@ async function handleFeedback(request, env, ctx) {
     const country = (request.headers.get('CF-IPCountry') || '').slice(0, 10);
     const safeMessage = message.trim().slice(0, 2000);
 
-    await env.DB.prepare('INSERT INTO feedback (page, lang, country, message) VALUES (?, ?, ?, ?)').bind(safePage, 'en', country, safeMessage).run();
+    const langMatch = safePage.match(/^\/([a-z]{2})\//);
+    const lang = (langMatch && LOCALE_CODES.includes(langMatch[1])) ? langMatch[1] : DEFAULT_LOCALE;
+    await env.DB.prepare('INSERT INTO feedback (page, lang, country, message) VALUES (?, ?, ?, ?)').bind(safePage, lang, country, safeMessage).run();
 
     ctx.waitUntil(
       fetch('https://ntfy2.com/sendf-fb-k9w2r', {
@@ -650,10 +654,22 @@ async function handleAdminFeedback(env, url) {
 </html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
-// ── Homepage ──
+// ── Language Detection ──
 
-function serveHomepage() {
-  return new Response(HOMEPAGE, {
+function detectLanguage(request) {
+  const accept = request.headers.get('Accept-Language') || '';
+  const primary = accept.split(',')[0].split(';')[0].trim().split('-')[0].toLowerCase();
+  if (primary && LOCALE_CODES.includes(primary)) return primary;
+  return null;
+}
+
+function html(body, lang, request) {
+  let page = body;
+  const suggested = detectLanguage(request);
+  if (suggested && suggested !== lang) {
+    page = page.replace(`<html lang=`, `<html data-suggest-lang="${suggested}" lang=`);
+  }
+  return new Response(page, {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'public, max-age=0, must-revalidate',
@@ -740,9 +756,15 @@ export default {
       return handleAdminFeedback(env, url);
     }
 
-    // Homepage
+    // Homepage (default locale)
     if (path === '/' || path === '') {
-      return serveHomepage();
+      return html(PAGES[DEFAULT_LOCALE], DEFAULT_LOCALE, request);
+    }
+
+    // Localized homepage: /th/, /ja/, /de/, /fr/, /es/
+    const localeHomeMatch = path.match(/^\/([a-z]{2})\/?$/);
+    if (localeHomeMatch && PAGES[localeHomeMatch[1]]) {
+      return html(PAGES[localeHomeMatch[1]], localeHomeMatch[1], request);
     }
 
     // Static assets

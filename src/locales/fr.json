@@ -1,0 +1,55 @@
+{
+  "locale": "fr",
+  "hreflang": "fr",
+  "htmlLang": "fr",
+  "ogLocale": "fr_FR",
+  "dir": "ltr",
+  "isDefault": false,
+  "langName": "Français",
+
+  "title": "sendf.cc — Partage de fichiers temporaire",
+  "metaDesc": "Déposez un fichier, obtenez un lien, il disparaît en 24 heures. Sans inscription, sans suivi. Partage de fichiers éphémère gratuit.",
+  "ogTitle": "sendf.cc — Partage de fichiers temporaire",
+  "ogDesc": "Déposez un fichier, obtenez un lien, il disparaît en 24 heures. Sans inscription.",
+
+  "h1Sub": "Déposez un fichier, obtenez un lien. Expire en 24 heures.",
+  "dropText": "<strong>Cliquez pour sélectionner</strong> ou glissez-déposez un fichier",
+  "dropLimit": "Max 500 Mo · Les fichiers sont supprimés après 24h",
+  "selectFile": "Sélectionner un fichier",
+  "uploading": "Envoi en cours",
+  "fileExpired": "Ce fichier a expiré ou n\u2019existe pas.",
+  "uploadAnother": "Envoyer un autre fichier",
+  "expires": "Expire",
+  "copy": "Copier",
+  "copied": "Copié !",
+
+  "featuresHeading": "Comment ça marche",
+  "feature1": "Envoyez un fichier jusqu\u2019à 500 Mo",
+  "feature2": "Obtenez un lien court instantanément",
+  "feature3": "Le fichier est supprimé après 24 heures",
+  "feature4": "Sans inscription, sans suivi",
+
+  "noscriptText": "sendf.cc est un service gratuit de partage de fichiers temporaire. Envoyez un fichier et obtenez un lien court qui expire en 24 heures. Sans inscription. JavaScript est nécessaire pour la fonctionnalité d\u2019envoi.",
+  "footerText": "Les fichiers sont stockés temporairement et supprimés après 24 heures.",
+
+  "feedbackToggle": "Envoyer un commentaire",
+  "feedbackPlaceholder": "Que pourrions-nous améliorer ?",
+  "feedbackSubmit": "Envoyer",
+
+  "js": {
+    "uploading": "Envoi en cours\u2026",
+    "uploadFailed": "Échec de l\u2019envoi",
+    "networkError": "Erreur réseau",
+    "fileTooLarge": "Fichier trop volumineux (max 500 Mo)",
+    "emptyFile": "Fichier vide",
+    "noNodes": "Service temporairement indisponible",
+    "expires": "Expire",
+    "copy": "Copier",
+    "copied": "Copié !",
+    "uploadAnother": "Envoyer un autre fichier",
+    "feedbackSending": "Envoi\u2026",
+    "feedbackThanks": "Merci pour votre commentaire !",
+    "feedbackError": "Une erreur est survenue. Veuillez réessayer.",
+    "switchLang": "Cette page est disponible en"
+  }
+}

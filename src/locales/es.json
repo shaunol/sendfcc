@@ -1,0 +1,55 @@
+{
+  "locale": "es",
+  "hreflang": "es",
+  "htmlLang": "es",
+  "ogLocale": "es_ES",
+  "dir": "ltr",
+  "isDefault": false,
+  "langName": "Español",
+
+  "title": "sendf.cc — Compartir archivos temporal",
+  "metaDesc": "Sube un archivo, obtén un enlace, desaparece en 24 horas. Sin registro, sin rastreo. Compartir archivos efímero y gratuito.",
+  "ogTitle": "sendf.cc — Compartir archivos temporal",
+  "ogDesc": "Sube un archivo, obtén un enlace, desaparece en 24 horas. Sin registro.",
+
+  "h1Sub": "Sube un archivo, obtén un enlace. Expira en 24 horas.",
+  "dropText": "<strong>Haz clic para seleccionar</strong> o arrastra y suelta un archivo",
+  "dropLimit": "Máx. 500 MB · Los archivos se eliminan después de 24h",
+  "selectFile": "Seleccionar archivo",
+  "uploading": "Subiendo",
+  "fileExpired": "Este archivo ha expirado o no existe.",
+  "uploadAnother": "Subir otro archivo",
+  "expires": "Expira",
+  "copy": "Copiar",
+  "copied": "¡Copiado!",
+
+  "featuresHeading": "Cómo funciona",
+  "feature1": "Sube cualquier archivo de hasta 500 MB",
+  "feature2": "Obtén un enlace corto al instante",
+  "feature3": "El archivo se elimina automáticamente después de 24 horas",
+  "feature4": "Sin registro, sin rastreo",
+
+  "noscriptText": "sendf.cc es un servicio gratuito de compartir archivos temporal. Sube un archivo y obtén un enlace corto que expira en 24 horas. Sin registro. Se necesita JavaScript para la función de subida.",
+  "footerText": "Los archivos se almacenan temporalmente y se eliminan después de 24 horas.",
+
+  "feedbackToggle": "Enviar comentarios",
+  "feedbackPlaceholder": "¿Qué podríamos mejorar?",
+  "feedbackSubmit": "Enviar",
+
+  "js": {
+    "uploading": "Subiendo\u2026",
+    "uploadFailed": "Error al subir",
+    "networkError": "Error de red",
+    "fileTooLarge": "Archivo demasiado grande (máx. 500 MB)",
+    "emptyFile": "Archivo vacío",
+    "noNodes": "Servicio no disponible temporalmente",
+    "expires": "Expira",
+    "copy": "Copiar",
+    "copied": "¡Copiado!",
+    "uploadAnother": "Subir otro archivo",
+    "feedbackSending": "Enviando\u2026",
+    "feedbackThanks": "¡Gracias por tus comentarios!",
+    "feedbackError": "Algo salió mal. Por favor, inténtalo de nuevo.",
+    "switchLang": "Esta página está disponible en"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "locale": "en",
+  "hreflang": "en",
+  "htmlLang": "en",
+  "ogLocale": "en_US",
+  "dir": "ltr",
+  "isDefault": true,
+  "langName": "English",
+
+  "title": "sendf.cc \u2014 Temporary File Sharing",
+  "metaDesc": "Drop a file, get a link, it disappears in 24 hours. No signup, no tracking. Free ephemeral file sharing.",
+  "ogTitle": "sendf.cc \u2014 Temporary File Sharing",
+  "ogDesc": "Drop a file, get a link, it disappears in 24 hours. No signup required.",
+
+  "h1Sub": "Drop a file, get a link. Expires in 24 hours.",
+  "dropText": "<strong>Click to select</strong> or drag &amp; drop a file",
+  "dropLimit": "Max 500 MB \u00b7 Files auto-delete after 24h",
+  "selectFile": "Select file",
+  "uploading": "Uploading",
+  "fileExpired": "This file has expired or doesn\u2019t exist.",
+  "uploadAnother": "Upload another file",
+  "expires": "Expires",
+  "copy": "Copy",
+  "copied": "Copied!",
+
+  "featuresHeading": "How it works",
+  "feature1": "Upload any file up to 500 MB",
+  "feature2": "Get a short link instantly",
+  "feature3": "File auto-deletes after 24 hours",
+  "feature4": "No signup, no tracking",
+
+  "noscriptText": "sendf.cc is a free temporary file sharing service. Upload a file and get a short link that expires in 24 hours. No signup required. JavaScript is needed for the upload functionality.",
+  "footerText": "Files are stored temporarily and auto-deleted after 24 hours.",
+
+  "feedbackToggle": "Send feedback",
+  "feedbackPlaceholder": "What could we do better?",
+  "feedbackSubmit": "Send",
+
+  "js": {
+    "uploading": "Uploading\u2026",
+    "uploadFailed": "Upload failed",
+    "networkError": "Network error",
+    "fileTooLarge": "File too large (max 500 MB)",
+    "emptyFile": "Empty file",
+    "noNodes": "Service temporarily unavailable",
+    "expires": "Expires",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "uploadAnother": "Upload another file",
+    "feedbackSending": "Sending\u2026",
+    "feedbackThanks": "Thanks for your feedback!",
+    "feedbackError": "Something went wrong. Please try again.",
+    "switchLang": "This page is available in"
+  }
+}

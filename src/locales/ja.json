@@ -1,0 +1,55 @@
+{
+  "locale": "ja",
+  "hreflang": "ja",
+  "htmlLang": "ja",
+  "ogLocale": "ja_JP",
+  "dir": "ltr",
+  "isDefault": false,
+  "langName": "日本語",
+
+  "title": "sendf.cc — 一時ファイル共有",
+  "metaDesc": "ファイルをアップロードしてリンクを取得。24時間後に自動削除。登録不要、追跡なし。無料の一時ファイル共有。",
+  "ogTitle": "sendf.cc — 一時ファイル共有",
+  "ogDesc": "ファイルをアップロードしてリンクを取得。24時間後に自動削除。登録不要。",
+
+  "h1Sub": "ファイルをドロップしてリンクを取得。24時間で期限切れ。",
+  "dropText": "<strong>クリックして選択</strong>またはファイルをドラッグ＆ドロップ",
+  "dropLimit": "最大 500 MB · ファイルは24時間後に自動削除",
+  "selectFile": "ファイルを選択",
+  "uploading": "アップロード中",
+  "fileExpired": "このファイルは期限切れまたは存在しません。",
+  "uploadAnother": "別のファイルをアップロード",
+  "expires": "有効期限",
+  "copy": "コピー",
+  "copied": "コピー済み！",
+
+  "featuresHeading": "使い方",
+  "feature1": "最大500 MBのファイルをアップロード",
+  "feature2": "短いリンクを即座に取得",
+  "feature3": "24時間後にファイルは自動削除",
+  "feature4": "登録不要、追跡なし",
+
+  "noscriptText": "sendf.ccは無料の一時ファイル共有サービスです。ファイルをアップロードして24時間で期限切れになる短いリンクを取得できます。登録不要。アップロード機能にはJavaScriptが必要です。",
+  "footerText": "ファイルは一時的に保存され、24時間後に自動削除されます。",
+
+  "feedbackToggle": "フィードバックを送信",
+  "feedbackPlaceholder": "改善点はありますか？",
+  "feedbackSubmit": "送信",
+
+  "js": {
+    "uploading": "アップロード中…",
+    "uploadFailed": "アップロード失敗",
+    "networkError": "ネットワークエラー",
+    "fileTooLarge": "ファイルが大きすぎます（最大500 MB）",
+    "emptyFile": "空のファイル",
+    "noNodes": "サービスは一時的に利用できません",
+    "expires": "有効期限",
+    "copy": "コピー",
+    "copied": "コピー済み！",
+    "uploadAnother": "別のファイルをアップロード",
+    "feedbackSending": "送信中…",
+    "feedbackThanks": "フィードバックありがとうございます！",
+    "feedbackError": "エラーが発生しました。もう一度お試しください。",
+    "switchLang": "このページは次の言語でもご覧いただけます"
+  }
+}

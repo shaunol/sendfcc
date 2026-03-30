@@ -1,19 +1,22 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="{{htmlLang}}" dir="{{dir}}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>sendf.cc &mdash; Temporary File Sharing</title>
-<meta name="description" content="Drop a file, get a link, it disappears in 24 hours. No signup, no tracking, no limits. Free ephemeral file sharing.">
-<link rel="canonical" href="https://sendf.cc/">
+<title>{{title}}</title>
+<meta name="description" content="{{metaDesc}}">
+<link rel="canonical" href="{{canonicalUrl}}">
 <link rel="icon" href="/favicon.ico" sizes="any">
-<meta property="og:title" content="sendf.cc — Temporary File Sharing">
-<meta property="og:description" content="Drop a file, get a link, it disappears in 24 hours. No signup required.">
+<meta property="og:title" content="{{ogTitle}}">
+<meta property="og:description" content="{{ogDesc}}">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://sendf.cc/">
+<meta property="og:url" content="{{canonicalUrl}}">
+<meta property="og:locale" content="{{ogLocale}}">
+{{ogLocaleAlternates}}
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="sendf.cc — Temporary File Sharing">
-<meta name="twitter:description" content="Drop a file, get a link, it disappears in 24 hours.">
+<meta name="twitter:title" content="{{ogTitle}}">
+<meta name="twitter:description" content="{{ogDesc}}">
+{{hreflangTags}}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=optional">
@@ -45,6 +48,60 @@
   .brand h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.02em; }
   .brand h1 .cc { color: var(--accent); }
   .brand p { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.35rem; }
+
+  /* Language suggestion */
+  .lang-suggest {
+    display: none;
+    font-size: 0.82rem;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    background: var(--accent-light);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+  .lang-suggest a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .lang-suggest a:hover {
+    text-decoration: underline;
+  }
+
+  /* Features */
+  .features {
+    margin-top: 1.5rem;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+  }
+  .features h2 {
+    font-size: 0.92rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: var(--text);
+  }
+  .features ul {
+    list-style: none;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+  .features li {
+    padding: 0.3rem 0;
+    padding-left: 1.25rem;
+    position: relative;
+  }
+  .features li::before {
+    content: '\2713';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-weight: 600;
+  }
 
   /* Drop zone */
   .dropzone {
@@ -170,6 +227,21 @@
   footer a { color: var(--accent); text-decoration: none; }
   footer a:hover { text-decoration: underline; }
 
+  /* Language picker */
+  .lang-picker {
+    margin-top: 0.5rem;
+  }
+  .lang-picker select {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    padding: 0.2rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
   /* Feedback */
   .feedback-wrap { margin-top: 0.75rem; }
   .feedback-toggle {
@@ -234,21 +306,23 @@
   <div class="container">
     <div class="brand">
       <h1>sendf<span class="cc">.cc</span></h1>
-      <p>Drop a file, get a link. Expires in 24 hours.</p>
+      <p>{{h1Sub}}</p>
     </div>
+
+    <div class="lang-suggest" id="langSuggest"></div>
 
     <div class="dropzone" id="dropzone">
       <div class="dropzone-icon" aria-hidden="true">&#128228;</div>
       <div class="dropzone-text">
-        <strong>Click to select</strong> or drag &amp; drop a file
+        {{dropText}}
       </div>
-      <div class="dropzone-limit">Max 500 MB &middot; Files auto-delete after 24h</div>
-      <input type="file" id="fileInput" aria-label="Select file">
+      <div class="dropzone-limit">{{dropLimit}}</div>
+      <input type="file" id="fileInput" aria-label="{{selectFile}}">
     </div>
 
     <div class="progress-wrap" id="progressWrap">
       <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-      <div class="progress-text" id="progressText">Uploading&hellip;</div>
+      <div class="progress-text" id="progressText">{{uploading}}&hellip;</div>
     </div>
 
     <div class="error-msg" id="errorMsg"></div>
@@ -258,38 +332,55 @@
         <div class="result-filename" id="resultFilename"></div>
         <div class="result-url-row">
           <input type="text" class="result-url" id="resultUrl" readonly>
-          <button type="button" class="copy-btn" id="copyBtn">Copy</button>
+          <button type="button" class="copy-btn" id="copyBtn">{{copy}}</button>
         </div>
         <div class="result-meta">
           <span id="resultSize"></span>
           <span id="resultExpiry"></span>
         </div>
       </div>
-      <a class="upload-another" id="uploadAnother">Upload another file</a>
+      <a class="upload-another" id="uploadAnother">{{uploadAnother}}</a>
+    </div>
+
+    <div class="features">
+      <h2>{{featuresHeading}}</h2>
+      <ul>
+        <li>{{feature1}}</li>
+        <li>{{feature2}}</li>
+        <li>{{feature3}}</li>
+        <li>{{feature4}}</li>
+      </ul>
     </div>
 
     <noscript>
-      <p>sendf.cc is a free, temporary file sharing service. Upload a file and get a short link that expires in 24 hours. No signup required. JavaScript is needed to use the upload functionality.</p>
+      <p>{{noscriptText}}</p>
     </noscript>
   </div>
 </main>
 
 <footer>
-  Files are stored temporarily and auto-deleted after 24 hours.
+  {{footerText}}
+  <div class="lang-picker">
+    <label for="langPicker" class="sr-only">Language</label>
+    <select id="langPicker">
+      {{languageOptions}}
+    </select>
+  </div>
   <div class="feedback-wrap">
-    <button type="button" class="feedback-toggle" id="fbToggle">Send feedback</button>
-    <form class="feedback-form" id="fbForm" aria-label="Send feedback">
+    <button type="button" class="feedback-toggle" id="fbToggle">{{feedbackToggle}}</button>
+    <form class="feedback-form" id="fbForm" aria-label="{{feedbackToggle}}">
       <label for="fbMsg" class="sr-only">Feedback</label>
-      <textarea id="fbMsg" placeholder="What could we do better?" maxlength="2000"></textarea>
+      <textarea id="fbMsg" placeholder="{{feedbackPlaceholder}}" maxlength="2000"></textarea>
       <div class="cf-turnstile" id="tsCont"></div>
       <div class="ts-status" id="tsStatus"></div>
-      <button type="submit" class="feedback-submit" id="fbSubmit" disabled>Send</button>
+      <button type="submit" class="feedback-submit" id="fbSubmit" disabled>{{feedbackSubmit}}</button>
     </form>
     <div class="feedback-msg" id="fbStatus" role="status" aria-live="polite"></div>
   </div>
 </footer>
 
 <script>
+var L = {{jsStrings}};
 (function() {
   var dropzone = document.getElementById('dropzone');
   var fileInput = document.getElementById('fileInput');
@@ -307,6 +398,26 @@
   var currentToken = null;
   var uploadToken = null;
   var tsLoaded = false;
+
+  // Language picker
+  var langPicker = document.getElementById('langPicker');
+  if (langPicker) {
+    langPicker.addEventListener('change', function() {
+      window.location.href = langPicker.value;
+    });
+  }
+
+  // Language suggestion
+  var LANG_NAMES = { en: 'English', th: '\u0e44\u0e17\u0e22', ja: '\u65e5\u672c\u8a9e', de: 'Deutsch', fr: 'Fran\u00e7ais', es: 'Espa\u00f1ol' };
+  var LANG_URLS = { en: '/', th: '/th/', ja: '/ja/', de: '/de/', fr: '/fr/', es: '/es/' };
+  (function() {
+    var suggest = document.documentElement.dataset.suggestLang;
+    if (!suggest || !LANG_NAMES[suggest]) return;
+    var el = document.getElementById('langSuggest');
+    if (!el) return;
+    el.innerHTML = (L.switchLang || '') + ' <a href="' + LANG_URLS[suggest] + '">' + LANG_NAMES[suggest] + '</a>';
+    el.style.display = 'block';
+  })();
 
   // Load Turnstile early (invisible, interaction-only)
   function loadTurnstile(targetId, callback) {
@@ -356,14 +467,14 @@
 
   function uploadFile(file) {
     if (!file) return;
-    if (file.size > 500 * 1024 * 1024) { showError('File too large (max 500 MB)'); return; }
-    if (file.size === 0) { showError('Empty file'); return; }
+    if (file.size > 500 * 1024 * 1024) { showError(L.fileTooLarge); return; }
+    if (file.size === 0) { showError(L.emptyFile); return; }
 
     dropzone.style.display = 'none';
     errorMsg.classList.remove('active');
     progressWrap.classList.add('active');
     progressFill.style.width = '0%';
-    progressText.textContent = 'Uploading ' + file.name + '\u2026';
+    progressText.textContent = L.uploading + ' ' + file.name;
 
     var formData = new FormData();
     formData.append('file', file);
@@ -389,20 +500,21 @@
           resultUrl.value = data.url;
           resultSize.textContent = formatBytes(data.size);
           var exp = new Date(data.expires);
-          resultExpiry.textContent = 'Expires ' + exp.toLocaleString();
+          resultExpiry.textContent = L.expires + ' ' + exp.toLocaleString();
           resultDiv.classList.add('active');
+          copyBtn.textContent = L.copy;
           // Reset Turnstile for next upload
           if (typeof turnstile !== 'undefined') turnstile.reset();
           uploadToken = null;
         } else {
-          showError(data.error || 'Upload failed');
+          showError(data.error || L.uploadFailed);
         }
       } catch (e) {
-        showError('Upload failed');
+        showError(L.uploadFailed);
       }
     };
 
-    xhr.onerror = function() { showError('Network error'); };
+    xhr.onerror = function() { showError(L.networkError); };
     xhr.send(formData);
   }
 
@@ -421,9 +533,9 @@
 
   copyBtn.addEventListener('click', function() {
     navigator.clipboard.writeText(resultUrl.value).then(function() {
-      copyBtn.textContent = 'Copied!';
+      copyBtn.textContent = L.copied;
       copyBtn.classList.add('copied');
-      setTimeout(function() { copyBtn.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 1500);
+      setTimeout(function() { copyBtn.textContent = L.copy; copyBtn.classList.remove('copied'); }, 1500);
     });
   });
 
@@ -443,7 +555,7 @@
     var open = fbForm.classList.toggle('open');
     if (open && !fbTsLoaded) {
       fbTsLoaded = true;
-      tsStatus.innerHTML = '<span class="dot">\u25cf</span> Verifying\u2026';
+      tsStatus.innerHTML = '<span class="dot">\u25cf</span>';
       window.__fbTsReady = function() {
         if (typeof turnstile !== 'undefined') {
           turnstile.render('#tsCont', {
@@ -471,28 +583,28 @@
   fbForm.addEventListener('submit', function(e) {
     e.preventDefault();
     fbSubmit.disabled = true;
-    fbStatus.textContent = 'Sending\u2026';
+    fbStatus.textContent = L.feedbackSending;
     fbStatus.className = 'feedback-msg';
     fetch('/api/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: fbMsg.value, page: '/', token: fbToken }),
+      body: JSON.stringify({ message: fbMsg.value, page: location.pathname, token: fbToken }),
     })
     .then(function(res) {
       if (res.ok) {
         fbForm.classList.remove('open');
         fbMsg.value = '';
         fbToken = null;
-        fbStatus.textContent = 'Thanks for your feedback!';
+        fbStatus.textContent = L.feedbackThanks;
         fbStatus.className = 'feedback-msg ok';
       } else {
-        fbStatus.textContent = 'Something went wrong. Please try again.';
+        fbStatus.textContent = L.feedbackError;
         fbStatus.className = 'feedback-msg err';
       }
       fbSubmit.disabled = true;
     })
     .catch(function() {
-      fbStatus.textContent = 'Something went wrong. Please try again.';
+      fbStatus.textContent = L.feedbackError;
       fbStatus.className = 'feedback-msg err';
     });
   });
