@@ -31,7 +31,10 @@ cat > /usr/local/bin/sendf-chunks.py <<'PYCHUNKS'
 import os, re, json, shutil, glob, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-FILES = '/files'
+# nginx uses `root /files;` at the server level, so URI /files/{id}/{name}
+# maps to filesystem /files/files/{id}/{name}. Write there to match existing
+# single-shot uploads and nginx's try_files lookup.
+FILES = '/files/files'
 PARTS = '/var/lib/sendf-parts'
 BUF = 1024 * 1024  # 1 MiB streaming buffer
 ID_RE = re.compile(r'^[A-Za-z0-9]{6,32}$')
