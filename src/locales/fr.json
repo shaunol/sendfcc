@@ -38,6 +38,10 @@
   "feedbackPlaceholder": "Que pourrions-nous améliorer ?",
   "feedbackSubmit": "Envoyer",
 
+  "resumeYes": "Reprendre",
+  "resumeNo": "Recommencer",
+  "cancelUpload": "Annuler",
+
   "js": {
     "uploading": "Envoi en cours\u2026",
     "uploadFailed": "Échec de l\u2019envoi",
@@ -49,6 +53,17 @@
     "copy": "Copier",
     "copied": "Copié !",
     "uploadAnother": "Envoyer un autre fichier",
+    "uploadPreparing": "Préparation de l\u2019envoi\u2026",
+    "uploadResuming": "Reprise en cours",
+    "uploadFinalizing": "Finalisation\u2026",
+    "uploadRepairing": "Récupération des morceaux manquants\u2026",
+    "uploadRetry": "Nouvelle tentative dans",
+    "uploadOffline": "Hors ligne — en attente de connexion",
+    "uploadResumedOnline": "De retour en ligne — reprise",
+    "uploadCanResume": "Sélectionnez le même fichier pour reprendre.",
+    "verifyingFirst": "Vérification en cours. Veuillez réessayer dans un instant.",
+    "resumeMsg": "Reprendre l\u2019envoi de {name} ? ({pct} déjà envoyé)",
+    "cancelConfirm": "Annuler l\u2019envoi ? La progression sera perdue.",
     "feedbackSending": "Envoi\u2026",
     "feedbackThanks": "Merci pour votre commentaire !",
     "feedbackError": "Une erreur est survenue. Veuillez réessayer.",

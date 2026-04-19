@@ -38,6 +38,10 @@
   "feedbackPlaceholder": "Was könnten wir verbessern?",
   "feedbackSubmit": "Senden",
 
+  "resumeYes": "Fortsetzen",
+  "resumeNo": "Neu starten",
+  "cancelUpload": "Abbrechen",
+
   "js": {
     "uploading": "Wird hochgeladen…",
     "uploadFailed": "Upload fehlgeschlagen",
@@ -49,6 +53,17 @@
     "copy": "Kopieren",
     "copied": "Kopiert!",
     "uploadAnother": "Weitere Datei hochladen",
+    "uploadPreparing": "Upload wird vorbereitet…",
+    "uploadResuming": "Wird fortgesetzt",
+    "uploadFinalizing": "Wird abgeschlossen…",
+    "uploadRepairing": "Fehlende Teile werden wiederhergestellt…",
+    "uploadRetry": "Erneuter Versuch in",
+    "uploadOffline": "Offline — warte auf Verbindung",
+    "uploadResumedOnline": "Wieder online — wird fortgesetzt",
+    "uploadCanResume": "Wählen Sie dieselbe Datei erneut, um fortzusetzen.",
+    "verifyingFirst": "Menschenprüfung läuft. Bitte in einem Moment erneut versuchen.",
+    "resumeMsg": "Vorherigen Upload von {name} fortsetzen? ({pct} bereits gesendet)",
+    "cancelConfirm": "Upload abbrechen? Fortschritt geht verloren.",
     "feedbackSending": "Wird gesendet…",
     "feedbackThanks": "Danke für Ihr Feedback!",
     "feedbackError": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",

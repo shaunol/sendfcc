@@ -5,11 +5,12 @@ A free, ephemeral file sharing service at sendf.cc. Users upload a file (no sign
 
 ## Architecture
 - **Single Cloudflare Worker** handles routing, upload proxy, download redirects, admin dashboard, feedback, i18n, and node health/bandwidth monitoring.
-- **Cloudflare D1** stores file metadata, feedback, request analytics, and node bandwidth history.
+- **Cloudflare D1** stores file metadata, feedback, request analytics, node bandwidth history, and in-progress upload sessions.
 - **Cloudflare KV** (`NODES`) stores node config, health status, and bandwidth rate data.
 - **DashboardHub Durable Object** provides real-time WebSocket push updates to the admin dashboard. Refreshes every 5 seconds for live bandwidth monitoring. Broadcasts immediately on request notifications (1-second debounce).
 - **Storage nodes** are cheap VPS boxes running Debian + nginx with WebDAV. Worker streams uploads to nodes and redirects downloads directly to them (CF never proxies file bytes — TOS safe).
-- **Files expire after 24 hours.** Nodes clean up via hourly cron (`find -mmin +1440 -delete`); D1 metadata cleaned by Worker cron.
+- **Chunked resumable uploads** are the primary upload path. The browser splits files into 4 MB chunks and uploads each through the Worker to the node's local `sendf-chunks` service (Python, systemd, 127.0.0.1:8788, fronted by nginx with `X-Upload-Key` auth). Chunks stage in `/var/lib/sendf-parts/{uploadId}/{NNNNNN}.part`; the node concatenates them into `/files/{uploadId}/{name}` on `POST /assemble/{id}`. Session state persists client-side in `localStorage` (keyed on `name|size|lastModified`) and server-side in D1 (`uploads` table). Per-chunk: 30 s stall detection, exponential backoff (≤6 retries), concurrency=2. Online/offline listeners pause and resume automatically. The legacy single-shot `POST /upload` is kept for curl/script use.
+- **Files expire after 24 hours.** Nodes clean up via hourly cron (`find -mmin +1440 -delete`); D1 metadata cleaned by Worker cron. Stale chunk-staging dirs are purged every 30 min (>12 h old).
 - **Node stats daemon** (`sendf-stats.sh`) runs on each node, writes `/proc/net/dev` counters + disk stats to `/var/www/stats.json` every 2 seconds. nginx serves it at `/stats`.
 
 ## Build system
@@ -23,7 +24,12 @@ A free, ephemeral file sharing service at sendf.cc. Users upload a file (no sign
 ## API routes
 - `GET /` — Homepage (default locale upload UI)
 - `GET /{locale}/` — Localized homepage (th, ja, de, fr, es)
-- `POST /upload` — Upload file (multipart/form-data, Turnstile protected, rate limited 20/IP/hour)
+- `POST /upload` — Legacy single-shot upload (multipart/form-data, Turnstile protected, rate limited 20/IP/hour) — kept for curl/scripts.
+- `POST /upload/init` — Start a chunked upload (JSON: `{filename, size, mime, token, ttl}`). Verifies Turnstile + rate limit, picks node, returns `{uploadId, chunkSize, totalChunks, ...}`.
+- `PUT /upload/chunk/{id}/{n}` — Stream one chunk body (raw octet-stream). Idempotent; safe to retry.
+- `GET /upload/status/{id}` — Returns which chunk indexes the node currently has, for resume.
+- `POST /upload/complete/{id}` — Verify all chunks present, ask node to assemble, write files metadata, return final URL. Idempotent.
+- `DELETE /upload/{id}` — Cancel and clean up server-side chunk dir + session row.
 - `GET /{id}` — Download redirect (302 to storage node, 8-char alphanumeric ID)
 - `POST /api/feedback` — Submit feedback (Turnstile protected)
 - `GET /admin` — Analytics dashboard (WebSocket live via DO, hourly + daily charts, node bandwidth)
@@ -46,6 +52,9 @@ A free, ephemeral file sharing service at sendf.cc. Users upload a file (no sign
 - **node_bandwidth** — Historical bandwidth snapshots (5-minute resolution)
   - Schema: `ts TEXT NOT NULL, node TEXT NOT NULL, rx_bytes INTEGER NOT NULL, tx_bytes INTEGER NOT NULL, disk_used INTEGER DEFAULT 0, file_count INTEGER DEFAULT 0, PRIMARY KEY (ts, node)`
   - Populated by cron every 5 minutes
+- **uploads** — In-progress chunked upload sessions (deleted on completion or expiry)
+  - Schema: `id TEXT PRIMARY KEY, node TEXT NOT NULL, filename TEXT NOT NULL, size INTEGER NOT NULL, mime TEXT DEFAULT '', ip TEXT DEFAULT '', country TEXT DEFAULT '', ttl_hours INTEGER NOT NULL DEFAULT 24, total_chunks INTEGER NOT NULL, chunk_size INTEGER NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0`
+  - Session TTL: 12 h (configurable via `UPLOAD_SESSION_TTL_HOURS` in worker). Cron deletes expired sessions.
 
 ## KV namespace: NODES
 - Key `config` — JSON array of storage node definitions: `[{ "id": "us1", "url": "https://us1.sendf.cc", "continent": "NA" }]`
@@ -63,19 +72,26 @@ A free, ephemeral file sharing service at sendf.cc. Users upload a file (no sign
 ### Node setup
 - Debian 12 + nginx-extras (WebDAV module) + Let's Encrypt
 - Upload auth via `X-Upload-Key` header (shared secret = `UPLOAD_KEY` Worker secret)
-- Provision with `./setup-node.sh <upload_key> <domain>`
+- Provision with `./setup-node.sh <upload_key> <domain>` (scp `install-chunks.sh` alongside — setup calls it)
 - Stats daemon: systemd service `sendf-stats` writes JSON to `/var/www/stats.json` every 2s
+- Chunk service: systemd service `sendf-chunks` (Python) listens on 127.0.0.1:8788; nginx proxies `/chunks/*` and `/assemble/*` to it
 - Stats endpoint: `GET /stats` returns `{ ok, ts, iface, rx, tx, disk_total, disk_used, disk_free, files, uptime, load }`
 - Health endpoint: `GET /health` returns "ok"
-- Cleanup cron: `0 * * * * find /files -type f -mmin +1440 -delete`
+- Cleanup crons:
+  - `0 * * * * find /files -type f -mmin +1440 -delete` (delete files >24 h)
+  - `*/30 * * * * find /var/lib/sendf-parts -mindepth 1 -maxdepth 1 -type d -mmin +720 -exec rm -rf {} +` (purge abandoned chunk dirs >12 h)
 - SSH: key-only auth (password disabled), root user
 - Firewall: UFW allowing 22/80/443 only
 
 ### Adding a new node
 1. Provision VPS (Debian 12, 100GB+ disk, 1Gbps unmetered)
 2. Point DNS: `A {subdomain}.sendf.cc → {IP}` (CF proxy OFF)
-3. Run: `ssh root@{IP}` then `./setup-node.sh {UPLOAD_KEY} {subdomain}.sendf.cc`
-4. Update KV config: add `{ "id": "{id}", "url": "https://{subdomain}.sendf.cc", "continent": "{NA|EU|AS}" }`
+3. `scp setup-node.sh install-chunks.sh root@{IP}:/root/`
+4. Run: `ssh root@{IP}` then `./setup-node.sh {UPLOAD_KEY} {subdomain}.sendf.cc`
+5. Update KV config: add `{ "id": "{id}", "url": "https://{subdomain}.sendf.cc", "continent": "{NA|EU|AS}" }`
+
+### Upgrading an existing node (to enable chunked uploads)
+`scp install-chunks.sh root@{IP}:/root/ && ssh root@{IP} 'bash /root/install-chunks.sh {UPLOAD_KEY} {subdomain}.sendf.cc'` — idempotent, safe to re-run.
 
 ## Deployment
 - **Auto-deploys on push to main** via GitHub integration.
@@ -89,6 +105,7 @@ A free, ephemeral file sharing service at sendf.cc. Users upload a file (no sign
    - `CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, page TEXT, lang TEXT, country TEXT, message TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`
    - `CREATE TABLE IF NOT EXISTS request_stats (date TEXT NOT NULL, hour TEXT NOT NULL DEFAULT '00', path TEXT NOT NULL, country TEXT NOT NULL DEFAULT '', hits INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (date, hour, path, country))`
    - `CREATE TABLE IF NOT EXISTS node_bandwidth (ts TEXT NOT NULL, node TEXT NOT NULL, rx_bytes INTEGER NOT NULL, tx_bytes INTEGER NOT NULL, disk_used INTEGER DEFAULT 0, file_count INTEGER DEFAULT 0, PRIMARY KEY (ts, node))`
+   - `CREATE TABLE IF NOT EXISTS uploads (id TEXT PRIMARY KEY, node TEXT NOT NULL, filename TEXT NOT NULL, size INTEGER NOT NULL, mime TEXT DEFAULT '', ip TEXT DEFAULT '', country TEXT DEFAULT '', ttl_hours INTEGER NOT NULL DEFAULT 24, total_chunks INTEGER NOT NULL, chunk_size INTEGER NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0)`
 4. Update `wrangler.jsonc` with KV/D1 IDs
 5. Set secrets: `npx wrangler secret put TURNSTILE_SECRET` and `npx wrangler secret put UPLOAD_KEY`
 6. Deploy: `npm run deploy`
@@ -152,6 +169,7 @@ sendfcc/
 │   └── robots.txt
 ├── build.js             # Stamps locales into template, outputs dist/worker.js
 ├── setup-node.sh        # VPS provisioning script (nginx + WebDAV + SSL + stats daemon)
+├── install-chunks.sh    # Idempotent installer for the chunked-upload service (called by setup-node.sh and re-runnable on existing nodes)
 ├── wrangler.jsonc       # Worker config (D1, KV, DO, cron)
 ├── package.json
 ├── CLAUDE.md

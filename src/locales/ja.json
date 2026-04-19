@@ -38,6 +38,10 @@
   "feedbackPlaceholder": "改善点はありますか？",
   "feedbackSubmit": "送信",
 
+  "resumeYes": "再開",
+  "resumeNo": "やり直す",
+  "cancelUpload": "キャンセル",
+
   "js": {
     "uploading": "アップロード中…",
     "uploadFailed": "アップロード失敗",
@@ -49,6 +53,17 @@
     "copy": "コピー",
     "copied": "コピー済み！",
     "uploadAnother": "別のファイルをアップロード",
+    "uploadPreparing": "アップロードを準備中…",
+    "uploadResuming": "再開中",
+    "uploadFinalizing": "確定中…",
+    "uploadRepairing": "不足チャンクを復旧中…",
+    "uploadRetry": "再試行まで",
+    "uploadOffline": "オフライン — 接続を待機中",
+    "uploadResumedOnline": "オンラインに復帰 — 再開中",
+    "uploadCanResume": "同じファイルを再度選択すると再開できます。",
+    "verifyingFirst": "人間であることを確認中です。しばらくしてから再試行してください。",
+    "resumeMsg": "{name} のアップロードを再開しますか？（{pct} 送信済み）",
+    "cancelConfirm": "アップロードをキャンセルしますか？進行状況は失われます。",
     "feedbackSending": "送信中…",
     "feedbackThanks": "フィードバックありがとうございます！",
     "feedbackError": "エラーが発生しました。もう一度お試しください。",

@@ -82,6 +82,7 @@ function stampLocale(loc) {
     'noscriptText', 'footerText',
     'expiryLabel',
     'feedbackToggle', 'feedbackPlaceholder', 'feedbackSubmit',
+    'resumeYes', 'resumeNo', 'cancelUpload',
   ];
 
   for (const key of simpleKeys) {

@@ -7,6 +7,8 @@ const DEFAULT_LOCALE = 'en';
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 const MAX_UPLOADS_PER_HOUR = 20;
 const FILE_TTL_HOURS = 24;
+const CHUNK_SIZE = 4 * 1024 * 1024;          // 4 MiB per chunk
+const UPLOAD_SESSION_TTL_HOURS = 12;         // how long a paused/interrupted upload can be resumed
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -196,6 +198,283 @@ async function handleUpload(request, env, ctx) {
     size: file.size,
     expires: expiresAt.toISOString(),
   });
+}
+
+// ── Chunked Resumable Upload ──
+//
+// Flow:
+//   POST /upload/init            -> verify Turnstile, rate-limit, pick node, write `uploads` row
+//   PUT  /upload/chunk/{id}/{n}  -> proxy chunk to node /chunks/{id}/{n}
+//   GET  /upload/status/{id}     -> report which chunks are stored on the node (for resume)
+//   POST /upload/complete/{id}   -> tell node to assemble, insert `files` row, return final URL
+//   DELETE /upload/{id}          -> cancel/cleanup
+
+async function getUploadSession(env, id) {
+  return env.DB.prepare(
+    'SELECT id, node, filename, size, mime, ip, country, ttl_hours, total_chunks, chunk_size, created_at, expires_at, completed FROM uploads WHERE id = ?'
+  ).bind(id).first();
+}
+
+async function getNodeById(env, id) {
+  const raw = await env.NODES.get('config');
+  const nodes = raw ? JSON.parse(raw) : [];
+  return nodes.find(n => n.id === id) || null;
+}
+
+async function handleUploadInit(request, env, ctx) {
+  let body;
+  try { body = await request.json(); }
+  catch { return json({ error: 'Invalid JSON' }, 400); }
+
+  const filename = typeof body.filename === 'string' ? body.filename : '';
+  const size = Number(body.size);
+  const mime = typeof body.mime === 'string' ? body.mime : '';
+  const token = typeof body.token === 'string' ? body.token : '';
+  const ttlHours = Math.min(Math.max(parseInt(body.ttl || '24', 10) || 24, 1), 24);
+
+  if (!filename) return json({ error: 'Missing filename' }, 400);
+  if (!Number.isFinite(size) || size <= 0) return json({ error: 'Invalid size' }, 400);
+  if (size > MAX_FILE_SIZE) return json({ error: 'File too large (max 500MB)' }, 400);
+  if (!token) return json({ error: 'Verification token required' }, 400);
+
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200) || 'file';
+  const safeMime = mime.slice(0, 100);
+
+  // Turnstile
+  const tsRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      secret: env.TURNSTILE_SECRET,
+      response: token,
+      remoteip: request.headers.get('CF-Connecting-IP'),
+    }),
+  });
+  const tsData = await tsRes.json();
+  if (!tsData.success) return json({ error: 'Verification failed' }, 403);
+
+  // Rate limit across both completed files and in-progress sessions
+  const ip = (request.headers.get('CF-Connecting-IP') || '').slice(0, 45);
+  const hourAgo = new Date(Date.now() - 3600000).toISOString();
+  const [filesCnt, upCnt] = await Promise.all([
+    env.DB.prepare('SELECT COUNT(*) as cnt FROM files WHERE ip = ? AND created_at > ?').bind(ip, hourAgo).first(),
+    env.DB.prepare('SELECT COUNT(*) as cnt FROM uploads WHERE ip = ? AND created_at > ?').bind(ip, hourAgo).first(),
+  ]);
+  const recent = ((filesCnt && filesCnt.cnt) || 0) + ((upCnt && upCnt.cnt) || 0);
+  if (recent >= MAX_UPLOADS_PER_HOUR) {
+    return json({ error: 'Rate limit exceeded. Try again later.' }, 429);
+  }
+
+  const continent = (request.cf && request.cf.continent) || 'NA';
+  const node = await pickNode(env, continent);
+  if (!node) return json({ error: 'No storage nodes available' }, 503);
+
+  try {
+    const s = await fetch(node.url + '/stats', { signal: AbortSignal.timeout(3000) });
+    if (s.ok) {
+      const stats = await s.json();
+      if (stats.disk_total > 0 && stats.disk_used / stats.disk_total > 0.9) {
+        return json({ error: 'We\u2019re a bit overloaded right now. Please try again in an hour.' }, 503);
+      }
+    }
+  } catch {}
+
+  const id = shortId();
+  const totalChunks = Math.max(1, Math.ceil(size / CHUNK_SIZE));
+  const country = (request.headers.get('CF-IPCountry') || '').slice(0, 10);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + UPLOAD_SESSION_TTL_HOURS * 3600000);
+
+  await env.DB.prepare(
+    'INSERT INTO uploads (id, node, filename, size, mime, ip, country, ttl_hours, total_chunks, chunk_size, created_at, expires_at, completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)'
+  ).bind(id, node.id, safeName, size, safeMime, ip, country, ttlHours, totalChunks, CHUNK_SIZE, now.toISOString(), expiresAt.toISOString()).run();
+
+  return json({
+    uploadId: id,
+    chunkSize: CHUNK_SIZE,
+    totalChunks,
+    filename: safeName,
+    size,
+    ttlHours,
+    sessionExpiresAt: expiresAt.toISOString(),
+  });
+}
+
+async function handleUploadChunk(request, env, uploadId, chunkIndex) {
+  const session = await getUploadSession(env, uploadId);
+  if (!session) return json({ error: 'Unknown upload' }, 404);
+  if (session.completed) return json({ error: 'Upload already completed' }, 409);
+  if (new Date(session.expires_at) < new Date()) return json({ error: 'Upload session expired' }, 410);
+  if (chunkIndex < 0 || chunkIndex >= session.total_chunks) {
+    return json({ error: 'Invalid chunk index' }, 400);
+  }
+
+  const contentLength = request.headers.get('Content-Length') || '';
+  const cl = parseInt(contentLength, 10);
+  if (!Number.isFinite(cl) || cl <= 0) return json({ error: 'Content-Length required' }, 411);
+  // Max per-chunk payload: chunk_size + some slack. Nginx also caps at 32M.
+  if (cl > session.chunk_size + 1024) return json({ error: 'Chunk too large' }, 413);
+
+  const node = await getNodeById(env, session.node);
+  if (!node) return json({ error: 'Storage node unavailable' }, 503);
+
+  // Stream the body straight through to the node.
+  const nodeRes = await fetch(node.url + '/chunks/' + uploadId + '/' + chunkIndex, {
+    method: 'PUT',
+    body: request.body,
+    headers: {
+      'X-Upload-Key': env.UPLOAD_KEY,
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': contentLength,
+    },
+  });
+  if (!nodeRes.ok) {
+    const text = await nodeRes.text().catch(() => '');
+    return json({ error: 'Chunk upload failed', status: nodeRes.status, detail: text.slice(0, 200) }, 502);
+  }
+  return json({ ok: true, n: chunkIndex });
+}
+
+async function handleUploadStatus(request, env, uploadId) {
+  const session = await getUploadSession(env, uploadId);
+  if (!session) return json({ error: 'Unknown upload' }, 404);
+
+  let parts = [];
+  let bytes = 0;
+  if (!session.completed) {
+    const node = await getNodeById(env, session.node);
+    if (node) {
+      try {
+        const r = await fetch(node.url + '/chunks/' + uploadId, {
+          headers: { 'X-Upload-Key': env.UPLOAD_KEY },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          parts = Array.isArray(d.parts) ? d.parts : [];
+          bytes = d.bytes || 0;
+        }
+      } catch {}
+    }
+  }
+
+  return json({
+    uploadId: session.id,
+    filename: session.filename,
+    size: session.size,
+    totalChunks: session.total_chunks,
+    chunkSize: session.chunk_size,
+    parts,
+    bytes,
+    completed: !!session.completed,
+    expiresAt: session.expires_at,
+  });
+}
+
+async function handleUploadComplete(request, env, ctx, uploadId) {
+  const session = await getUploadSession(env, uploadId);
+  if (!session) return json({ error: 'Unknown upload' }, 404);
+  if (session.completed) {
+    // Idempotent: return the existing file record so the client can resume to the success state.
+    const existing = await env.DB.prepare('SELECT id, filename, size, expires_at FROM files WHERE id = ?').bind(uploadId).first();
+    if (existing) {
+      return json({
+        id: existing.id,
+        url: 'https://sendf.cc/' + existing.id,
+        filename: existing.filename,
+        size: existing.size,
+        expires: existing.expires_at,
+      });
+    }
+    return json({ error: 'Upload already completed but file missing' }, 409);
+  }
+  if (new Date(session.expires_at) < new Date()) return json({ error: 'Upload session expired' }, 410);
+
+  const node = await getNodeById(env, session.node);
+  if (!node) return json({ error: 'Storage node unavailable' }, 503);
+
+  // Verify all chunks present before asking the node to assemble.
+  let parts = [];
+  try {
+    const sr = await fetch(node.url + '/chunks/' + uploadId, {
+      headers: { 'X-Upload-Key': env.UPLOAD_KEY },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!sr.ok) return json({ error: 'Node status check failed' }, 502);
+    const d = await sr.json();
+    parts = Array.isArray(d.parts) ? d.parts : [];
+  } catch {
+    return json({ error: 'Node unreachable' }, 502);
+  }
+  if (parts.length !== session.total_chunks) {
+    const missing = [];
+    const have = new Set(parts);
+    for (let i = 0; i < session.total_chunks && missing.length < 50; i++) {
+      if (!have.has(i)) missing.push(i);
+    }
+    return json({ error: 'Missing chunks', have: parts.length, want: session.total_chunks, missing }, 409);
+  }
+
+  // Assemble on node. Large files take time — up to 10 minutes.
+  const asm = await fetch(node.url + '/assemble/' + uploadId, {
+    method: 'POST',
+    headers: { 'X-Upload-Key': env.UPLOAD_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: session.filename, totalChunks: session.total_chunks }),
+    signal: AbortSignal.timeout(600000),
+  });
+  if (!asm.ok) {
+    const text = await asm.text().catch(() => '');
+    return json({ error: 'Assembly failed', detail: text.slice(0, 200) }, 502);
+  }
+  const result = await asm.json().catch(() => ({}));
+  const finalSize = Number(result.size) || session.size;
+  const finalName = (result.filename || session.filename);
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + session.ttl_hours * 3600000);
+  await env.DB.prepare(
+    'INSERT OR REPLACE INTO files (id, node, filename, size, mime, ip, country, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(uploadId, session.node, finalName, finalSize, session.mime || '', session.ip, session.country, now.toISOString(), expiresAt.toISOString()).run();
+  await env.DB.prepare('UPDATE uploads SET completed = 1 WHERE id = ?').bind(uploadId).run();
+
+  ctx.waitUntil((async () => {
+    try {
+      const doId = env.DASHBOARD_HUB.idFromName('singleton');
+      await env.DASHBOARD_HUB.get(doId).fetch('https://internal/notify');
+    } catch {}
+    await fetch('https://ntfy2.com/sendf-up-k9w2r', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain', 'Title': 'sendf.cc upload', 'Tags': 'arrow_up' },
+      body: finalName + ' (' + formatBytes(finalSize) + ')\n' + (session.country || '') + ' \u2192 ' + session.node + ' | https://sendf.cc/' + uploadId,
+    }).catch(() => {});
+  })());
+
+  return json({
+    id: uploadId,
+    url: 'https://sendf.cc/' + uploadId,
+    filename: finalName,
+    size: finalSize,
+    expires: expiresAt.toISOString(),
+  });
+}
+
+async function handleUploadAbort(request, env, uploadId) {
+  const session = await getUploadSession(env, uploadId);
+  if (!session) return json({ ok: true });
+  if (!session.completed) {
+    const node = await getNodeById(env, session.node);
+    if (node) {
+      try {
+        await fetch(node.url + '/chunks/' + uploadId, {
+          method: 'DELETE',
+          headers: { 'X-Upload-Key': env.UPLOAD_KEY },
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch {}
+    }
+    await env.DB.prepare('DELETE FROM uploads WHERE id = ?').bind(uploadId).run();
+  }
+  return json({ ok: true });
 }
 
 // ── Error Page ──
@@ -1824,6 +2103,8 @@ export default {
     }
     // Clean expired files from D1
     await env.DB.prepare('DELETE FROM files WHERE expires_at < datetime("now")').run().catch(() => {});
+    // Clean expired / abandoned upload sessions (the node-side cron purges the actual chunk dirs).
+    await env.DB.prepare('DELETE FROM uploads WHERE expires_at < datetime("now") OR (completed = 1 AND created_at < datetime("now", "-1 day"))').run().catch(() => {});
   },
 
   async fetch(request, env, ctx) {
@@ -1848,9 +2129,30 @@ export default {
       );
     }
 
-    // Upload
+    // Upload (legacy single-shot — kept for curl / scripted callers)
     if (path === '/upload' && request.method === 'POST') {
       return handleUpload(request, env, ctx);
+    }
+
+    // Chunked resumable upload
+    if (path === '/upload/init' && request.method === 'POST') {
+      return handleUploadInit(request, env, ctx);
+    }
+    const chunkMatch = path.match(/^\/upload\/chunk\/([A-Za-z0-9]+)\/(\d+)$/);
+    if (chunkMatch && request.method === 'PUT') {
+      return handleUploadChunk(request, env, chunkMatch[1], parseInt(chunkMatch[2], 10));
+    }
+    const statusMatch = path.match(/^\/upload\/status\/([A-Za-z0-9]+)$/);
+    if (statusMatch && request.method === 'GET') {
+      return handleUploadStatus(request, env, statusMatch[1]);
+    }
+    const completeMatch = path.match(/^\/upload\/complete\/([A-Za-z0-9]+)$/);
+    if (completeMatch && request.method === 'POST') {
+      return handleUploadComplete(request, env, ctx, completeMatch[1]);
+    }
+    const abortMatch = path.match(/^\/upload\/([A-Za-z0-9]+)$/);
+    if (abortMatch && request.method === 'DELETE') {
+      return handleUploadAbort(request, env, abortMatch[1]);
     }
 
     // Feedback API

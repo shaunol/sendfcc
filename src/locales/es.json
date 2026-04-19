@@ -38,6 +38,10 @@
   "feedbackPlaceholder": "¿Qué podríamos mejorar?",
   "feedbackSubmit": "Enviar",
 
+  "resumeYes": "Reanudar",
+  "resumeNo": "Empezar de nuevo",
+  "cancelUpload": "Cancelar",
+
   "js": {
     "uploading": "Subiendo\u2026",
     "uploadFailed": "Error al subir",
@@ -49,6 +53,17 @@
     "copy": "Copiar",
     "copied": "¡Copiado!",
     "uploadAnother": "Subir otro archivo",
+    "uploadPreparing": "Preparando subida\u2026",
+    "uploadResuming": "Reanudando",
+    "uploadFinalizing": "Finalizando\u2026",
+    "uploadRepairing": "Recuperando fragmentos faltantes\u2026",
+    "uploadRetry": "Reintentando en",
+    "uploadOffline": "Sin conexión — esperando conexión",
+    "uploadResumedOnline": "De vuelta en línea — reanudando",
+    "uploadCanResume": "Selecciona el mismo archivo de nuevo para reanudar.",
+    "verifyingFirst": "Verificando que eres humano. Inténtalo de nuevo en un momento.",
+    "resumeMsg": "¿Reanudar la subida de {name}? ({pct} ya enviado)",
+    "cancelConfirm": "¿Cancelar la subida? Se perderá el progreso.",
     "feedbackSending": "Enviando\u2026",
     "feedbackThanks": "¡Gracias por tus comentarios!",
     "feedbackError": "Algo salió mal. Por favor, inténtalo de nuevo.",

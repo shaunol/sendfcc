@@ -233,6 +233,16 @@ nginx -t && systemctl restart nginx
 # ── SSL via Let's Encrypt ──
 certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
 
+# ── Chunk upload service ──
+# Delegates to install-chunks.sh so the logic stays in one place and can be re-run
+# on existing nodes to upgrade them.
+if [ -f "$(dirname "$0")/install-chunks.sh" ]; then
+  bash "$(dirname "$0")/install-chunks.sh" "$UPLOAD_KEY" "$DOMAIN"
+else
+  echo "WARNING: install-chunks.sh not found next to setup-node.sh — chunked uploads disabled."
+  echo "         scp both files to the node and re-run, or run install-chunks.sh separately."
+fi
+
 # ── Logrotate ──
 cat > /etc/logrotate.d/nginx-sendf <<'LOGROTATE'
 /var/log/nginx/access.log /var/log/nginx/error.log {
@@ -266,6 +276,7 @@ echo "Node URL:  https://${DOMAIN}"
 echo "Health:    https://${DOMAIN}/health"
 echo "Stats:     https://${DOMAIN}/stats"
 echo "Upload:    PUT https://${DOMAIN}/files/{id}/{filename} (X-Upload-Key header)"
+echo "Chunks:    PUT https://${DOMAIN}/chunks/{id}/{n}  |  POST https://${DOMAIN}/assemble/{id}"
 echo "DL Stats:  https://${DOMAIN}/download-stats/{file_id}"
 echo "Speed:     https://${DOMAIN}/speedtest-10mb.bin"
 echo ""

@@ -38,6 +38,10 @@
   "feedbackPlaceholder": "What could we do better?",
   "feedbackSubmit": "Send",
 
+  "resumeYes": "Resume",
+  "resumeNo": "Start over",
+  "cancelUpload": "Cancel",
+
   "js": {
     "uploading": "Uploading\u2026",
     "uploadFailed": "Upload failed",
@@ -49,6 +53,17 @@
     "copy": "Copy",
     "copied": "Copied!",
     "uploadAnother": "Upload another file",
+    "uploadPreparing": "Preparing upload\u2026",
+    "uploadResuming": "Resuming",
+    "uploadFinalizing": "Finalizing\u2026",
+    "uploadRepairing": "Recovering missing chunks\u2026",
+    "uploadRetry": "Retrying in",
+    "uploadOffline": "Offline \u2014 waiting for connection",
+    "uploadResumedOnline": "Back online \u2014 resuming",
+    "uploadCanResume": "You can pick the same file again to resume.",
+    "verifyingFirst": "Still verifying you\u2019re human. Please try again in a moment.",
+    "resumeMsg": "Resume previous upload of {name}? ({pct} already sent)",
+    "cancelConfirm": "Cancel upload? Progress will be lost.",
     "feedbackSending": "Sending\u2026",
     "feedbackThanks": "Thanks for your feedback!",
     "feedbackError": "Something went wrong. Please try again.",
